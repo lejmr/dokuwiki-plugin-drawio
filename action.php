@@ -4,7 +4,7 @@
      * with the dokuwiki's event controller
      */
 
-    // if(!defined('DOKU_INC')) die();
+    if(!defined('DOKU_INC')) die();
  
  
     class action_plugin_drawio extends DokuWiki_Action_Plugin {
@@ -54,16 +54,17 @@
             $whandle = fopen($file_path,'w');
             fwrite($whandle,base64_decode($base64data));
             fclose($whandle);
+            
+            // No response is necessary
+            // //data
+            // $data = array($media_dir, $file_path);
         
-            //data
-            $data = array($media_dir, $file_path);
+            // //json library of DokuWiki
+            // $json = new JSON();
         
-            //json library of DokuWiki
-            $json = new JSON();
-        
-            //set content type
-            header('Content-Type: application/json');
-            echo $json->encode($data);
+            // //set content type
+            // header('Content-Type: application/json');
+            // echo $json->encode($data);
         }
 
     }

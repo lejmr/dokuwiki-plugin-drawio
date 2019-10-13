@@ -22,14 +22,6 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
     }
 
     /**
-     * @return string Paragraph type
-     */
-    // public function getPType()
-    // {
-    //     return 'normal';
-    // }
-
-    /**
      * @return int Sort order - Low numbers go before high numbers
      */
     public function getSort()
@@ -44,17 +36,8 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
      */
     public function connectTo($mode)
     {
-        // $this->Lexer->addSpecialPattern('<FIXME>', $mode, 'plugin_drawio');
-        // $this->Lexer->addSpecialPattern("<drawio>", $mode, 'plugin_drawio');
         $this->Lexer->addSpecialPattern("\{\{drawio>.+?\}\}",$mode,'plugin_drawio'); 
-        // 
-//        $this->Lexer->addEntryPattern('<FIXME>', $mode, 'plugin_drawio');
     }
-
-//    public function postConnect()
-//    {
-//        $this->Lexer->addExitPattern('</FIXME>', 'plugin_drawio');
-//    }
 
     /**
      * Handle matches of the drawio syntax
@@ -121,7 +104,10 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         $fc = file_get_contents($load_file_path);
 
         // Render image
-        $renderer->doc .= $name." ".$file_path." <br /> <span class='drawio'><img class='mediacenter' id='".trim($data)."' style='max-width:100%;cursor:pointer;' onclick='edit(this);' src='data:image/png;base64,".base64_encode($fc)."' alt='".$file_name."' /></span>";
+        $renderer->doc .= "<img class='mediacenter' id='".trim($data)."' 
+                            style='max-width:100%;cursor:pointer;' 
+                            onclick='edit(this);' src='data:image/png;base64,".base64_encode($fc)."' 
+                            alt='".$file_name."' />";
         return true;
     }
 }
