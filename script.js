@@ -1,3 +1,4 @@
+// Embeded editor
 var editor = 'https://www.draw.io/?embed=1&ui=atlas&spin=1&proto=json';
 var initial = null;
 var name = null;
@@ -92,4 +93,25 @@ function edit(image)
     window.addEventListener('message', receive);
     iframe.setAttribute('src', editor);
     document.body.appendChild(iframe);
+};
+
+
+// Toolbar menu items
+function getImageName(){
+    seq = JSINFO.id.split(":");
+    seq = seq.slice(0,seq.length-1);
+    seq.push("diagram1");
+    return seq.join(":");
+}
+
+if (typeof window.toolbar !== 'undefined') {
+    toolbar[toolbar.length] = {
+        type: "format",
+        title: "",
+        icon: "../../plugins/drawio/icon.png",
+        key: "",
+        // open: "{{drawio>" + JSINFO.id + "}}",
+        open: "{{drawio>" + getImageName() + "}}",
+        close: ""
+    };
 };
