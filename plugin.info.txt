@@ -4,4 +4,4 @@ email  milos.kozak@lejmr.com
 date   2019-10-12
 name   Draw.io plugin
 desc   Draw.io integration
-url    https://lejmr.com
+url    https://www.dokuwiki.org/plugin:drawio
