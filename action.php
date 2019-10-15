@@ -11,8 +11,20 @@
 
         public function register(Doku_Event_Handler $controller) {
             $controller->register_hook('AJAX_CALL_UNKNOWN', 'BEFORE', $this,'_ajax_call');
+            // $controller->register_hook('TOOLBAR_DEFINE', 'AFTER', $this, 'insert_button', array ());
         }
         
+        // function insert_button(Doku_Event $event, $param) {
+        //     $event->data[] = array (
+        //         'type' => 'format',
+        //         'title' => $this->getLang('abutton'),
+        //         'icon' => '../../plugins/drawio/icon.png',
+        //         'open' => '<abutton>',
+        //         'close' => '',
+        //         'block' => false,
+        //     );
+        // }
+
         /**
          * handle ajax requests
          */
@@ -25,13 +37,12 @@
             $event->preventDefault();
         
             //e.g. access additional request variables
+            global $conf;
             global $INPUT; //available since release 2012-10-13 "Adora Belle"
             $name = $INPUT->str('imageName');
-            $content = $INPUT->str('content');
+            $action = $INPUT->str('action');
 
-            // Convert image name to absolute path
-            global $conf;        
-            
+            // Convert image name to absolute path         
             $name = strtolower(trim($name));
             $namespace="";
             $lastColonPos = strripos($name,":");
@@ -49,22 +60,24 @@
             $image_file = $name.'.png';
             $file_path = "/".join("/", array(trim($media_dir, "/"), $image_file));
 
-            // Write content to file
-            $base64data = explode(",", $content)[1];
-            $whandle = fopen($file_path,'w');
-            fwrite($whandle,base64_decode($base64data));
-            fclose($whandle);
             
-            // No response is necessary
-            // //data
-            // $data = array($media_dir, $file_path);
-        
-            // //json library of DokuWiki
-            // $json = new JSON();
-        
-            // //set content type
-            // header('Content-Type: application/json');
-            // echo $json->encode($data);
+            
+            if($action == 'save'){
+                // Write content to file
+                $content = $INPUT->str('content');
+                $base64data = explode(",", $content)[1];
+                $whandle = fopen($file_path,'w');
+                fwrite($whandle,base64_decode($base64data));
+                fclose($whandle);
+            }
+
+            if($action == 'get'){
+                // Return image in the base64 for draw.io
+                $json = new JSON();
+                header('Content-Type: application/json');
+                $fc = file_get_contents($file_path);
+                echo $json->encode(array("content" => "data:image/png;base64,".base64_encode($fc)));
+            }
         }
 
     }

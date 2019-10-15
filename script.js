@@ -46,8 +46,19 @@ function edit(image)
                 }
                 else
                 {
-                    iframe.contentWindow.postMessage(JSON.stringify({action: 'load',
-                        autosave: 1, xmlpng: image.getAttribute('src')}), '*');
+                    // Read from AJAX
+                    jQuery.post(
+                        DOKU_BASE + 'lib/exe/ajax.php',
+                        {
+                            call: 'plugin_drawio', 
+                            imageName: imagePointer.getAttribute('id'),
+                            action: 'get'
+                        },
+                        function(data){
+                            iframe.contentWindow.postMessage(JSON.stringify({action: 'load',
+                                autosave: 1, xmlpng: data.content}), '*');
+                        }
+                    );
                 }
             }
             else if (msg.event == 'export')
@@ -64,7 +75,8 @@ function edit(image)
                     {
                         call: 'plugin_drawio', 
                         imageName: imagePointer.getAttribute('id'),
-                        content: msg.data
+                        content: msg.data,
+                        action: 'save'
                     }
                 );
             }

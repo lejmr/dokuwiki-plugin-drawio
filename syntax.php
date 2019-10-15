@@ -69,45 +69,11 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
             return false;
         }
 
-        //check name 
-        $name = $data;
-        global $conf;
-
-        $name = strtolower(trim($name));
-        if (strlen($name)==0) {
-          $renderer->doc.="---INVALID_DIAGRAM---";
-          return true;
-        }
-
-        // Test if file exists
-        $namespace="";
-        $lastColonPos = strripos($name,":");
-        if ($lastColonPos>0) {
-        	$namespace=substr($name, 0, $lastColonPos);
-        	$name = substr($name, $lastColonPos+1);
-        }
-                
-        $namespace.=':';
-        $media_dir = join("/", array($conf['mediadir'], trim(str_replace(":","/",$namespace), "/") ));
-        if (! file_exists($media_dir)) {
-        	mkdir ($media_dir, 0755, true);
-        }
-        
-        $image_file = $name.'.png';
-        $file_path = "/".join("/", array(trim($media_dir, "/"), $image_file));
-        $load_file_path = $file_path;
-
-        // Override file path if file does not exist (yet)
-        if(!file_exists($file_path)){
-            $load_file_path = join("/", array($conf["mediadir"], "wiki", "dokuwiki-128.png"));
-        }
-        $fc = file_get_contents($load_file_path);
-
-        // Render image
         $renderer->doc .= "<img class='mediacenter' id='".trim($data)."' 
-                            style='max-width:100%;cursor:pointer;' 
-                            onclick='edit(this);' src='data:image/png;base64,".base64_encode($fc)."' 
-                            alt='".$file_name."' />";
+                        style='max-width:100%;cursor:pointer;' 
+                        onclick='edit(this);' 
+                        src='/lib/exe/fetch.php?media=".$data.".png' 
+                        alt='".$file_name."' />";
         return true;
     }
 }
