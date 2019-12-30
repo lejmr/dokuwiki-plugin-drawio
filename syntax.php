@@ -72,7 +72,7 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         $renderer->doc .= "<img class='mediacenter' id='".trim($data)."' 
                         style='max-width:100%;cursor:pointer;' 
                         onclick='edit(this);' 
-                        src='/lib/exe/fetch.php?media=".$data.".png' 
+                        src='".DOKU_BASE."lib/exe/fetch.php?media=".$data.".png' 
                         alt='".$file_name."' />";
         return true;
     }
