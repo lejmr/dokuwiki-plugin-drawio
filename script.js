@@ -79,6 +79,11 @@ function edit(image)
                         action: 'save'
                     }
                 );
+                
+                // Clean cache of this page
+                var url = new URL(window.location.href);
+                url.searchParams.set('purge', 'true');
+                jQuery.get(url);
             }
             else if (msg.event == 'autosave')
             {
