@@ -69,6 +69,20 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
             return false;
         }
 
+        // Validate that the image exists otherwise pring a default image
+        global $conf;
+        $image_in_mediadir = join("/", array($conf['mediadir'], trim(str_replace(":","/",$data), "/") ));
+        if(!file_exists($image_in_mediadir.".png")){
+            $renderer->doc .= "<img class='mediacenter' id='".trim($data)."' 
+                        style='max-width:100%;cursor:pointer;' 
+                        onclick='edit(this);' 
+                        src='".DOKU_BASE."lib/plugins/drawio/blank-image.png' 
+                        alt='".$file_name."' />";
+            // $renderer->doc = $image_in_mediadir;
+            return true;
+        }
+
+
         $renderer->doc .= "<img class='mediacenter' id='".trim($data)."' 
                         style='max-width:100%;cursor:pointer;' 
                         onclick='edit(this);' 
