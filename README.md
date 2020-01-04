@@ -46,4 +46,4 @@ This is how to start local development server:
 
 ```docker-compose up```
   
-Wait until server is started, and feel free to login using *superuser:password* credentials and go on and develop.
+Wait until server is started, and feel free to login using *superuser:password* credentials and go on and develop. The development server is available at address http://localhost:8080
