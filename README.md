@@ -6,7 +6,7 @@ Automatically generated documentation (I guess the DokuWiki community likes this
 Draw.io integration
 
 All documentation for this plugin can be found at
-https://lejmr.com
+https://www.dokuwiki.org/plugin:drawio and https://github.com/lejmr/dokuwiki-plugin-drawio
 
 If you install this plugin manually, make sure it is installed in
 lib/plugins/drawio/ - if the folder is called different it
