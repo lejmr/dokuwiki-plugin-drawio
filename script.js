@@ -6,10 +6,28 @@ var imagePointer = null;
 
 function edit(image)
 {
+    var imgPointer = image;
+    jQuery.post(
+        DOKU_BASE + 'lib/exe/ajax.php',
+        {
+            call: 'plugin_drawio', 
+            imageName: imgPointer.getAttribute('id'),
+            action: 'get_auth'
+        },
+		function(data) {
+			if (data != 'true') return;
+			edit_cb(imgPointer);
+		}
+	);
+}
+
+function edit_cb(image)
+{
+    imagePointer = image;
+
     var iframe = document.createElement('iframe');
     iframe.setAttribute('frameborder', '0');
     iframe.setAttribute('class', 'drawio');
-    imagePointer = image;
 
     var close = function()
     {
@@ -34,7 +52,7 @@ function edit(image)
         if (evt.data.length > 0)
         {
             var msg = JSON.parse(evt.data);
-            
+			
             if (msg.event == 'init')
             {
                 if (draft != null)
@@ -46,7 +64,6 @@ function edit(image)
                 }
                 else
                 {
-                    // Read from AJAX
                     jQuery.post(
                         DOKU_BASE + 'lib/exe/ajax.php',
                         {
@@ -59,6 +76,7 @@ function edit(image)
                                 autosave: 1, xmlpng: data.content}), '*');
                         }
                     );
+					
                 }
             }
             else if (msg.event == 'export')
@@ -94,9 +112,6 @@ function edit(image)
                 iframe.contentWindow.postMessage(JSON.stringify({action: 'export',
                     format: 'xmlpng', xml: msg.xml, spin: 'Updating page'}), '*');
                 localStorage.setItem('.draft-' + name, JSON.stringify({lastModified: new Date(), xml: msg.xml}));
-
-                
-
             }
             else if (msg.event == 'exit')
             {
@@ -106,7 +121,6 @@ function edit(image)
             }
         }
     };
-
     window.addEventListener('message', receive);
     iframe.setAttribute('src', editor);
     document.body.appendChild(iframe);

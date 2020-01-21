@@ -37,48 +37,83 @@
             $event->preventDefault();
         
             //e.g. access additional request variables
-            global $conf;
+            global $conf, $lang;
             global $INPUT; //available since release 2012-10-13 "Adora Belle"
             $name = $INPUT->str('imageName');
             $action = $INPUT->str('action');
-
-            // Convert image name to absolute path         
-            $name = strtolower(trim($name));
-            $namespace="";
-            $lastColonPos = strripos($name,":");
-            if ($lastColonPos>0) {
-                $namespace=substr($name, 0, $lastColonPos);
-                $name = substr($name, $lastColonPos+1);
+			
+			$media_id = $name . '.png';
+			$media_id = cleanID($media_id);
+			$fl = mediaFN($media_id);
+			
+			// Get user info		
+			global $USERINFO;
+			global $INPUT;
+			global $INFO;
+			
+			$user = $INPUT->server->str('REMOTE_USER');
+			$groups = (array) $USERINFO['grps'];
+			$auth_ow = (($conf['mediarevisions']) ? AUTH_UPLOAD : AUTH_DELETE);
+			$id = cleanID($name);
+			
+			// Check ACL
+			$auth = auth_aclcheck($id, $user, $groups);
+			$access_granted = ($auth >= $auth_ow);
+		
+			// AJAX request
+			if ($action == 'get_auth')
+			{
+                $json = new JSON();
+				echo $json->encode($access_granted);
+				return;
             }
-                    
-            $namespace.=':';
-            $media_dir = join("/", array($conf['mediadir'], trim(str_replace(":","/",$namespace), "/") ));
-            if (! file_exists($media_dir)) {
-                mkdir ($media_dir, 0755, true);
-            }
-            
-            $image_file = $name.'.png';
-            $file_path = "/".join("/", array(trim($media_dir, "/"), $image_file));
+						;
+			if (!$access_granted)
+				return array($lang['media_perm_upload'], 0);
 
-            
-            
-            if($action == 'save'){
+			io_makeFileDir($fl);
+		    if($action == 'save'){
+				
+				$old = @filemtime($fl);
+				if(!file_exists(mediaFN($media_id, $old)) && file_exists($fl)) {
+					// add old revision to the attic if missing
+					media_saveOldRevision($media_id);
+				}
+				$filesize_old = file_exists($fl) ? filesize($fl) : 0;
+				
+				// prepare directory
+				io_createNamespace($media_id, 'media');
+
                 // Write content to file
                 $content = $INPUT->str('content');
                 $base64data = explode(",", $content)[1];
-                $whandle = fopen($file_path,'w');
+                //$whandle = fopen($file_path,'w');
+                $whandle = fopen($fl, 'w');
                 fwrite($whandle,base64_decode($base64data));
                 fclose($whandle);
-            }
-
+				
+				@clearstatcache(true, $fl);
+				$new = @filemtime($fl);
+				chmod($fl, $conf['fmode']);
+				
+				// Add to log
+				$filesize_new = filesize($fl);
+				$sizechange = $filesize_new - $filesize_old;
+				if ($filesize_old != 0) {
+				    addMediaLogEntry($new, $media_id, DOKU_CHANGE_TYPE_EDIT, '', '', null, $sizechange);
+				} else {
+					addMediaLogEntry($new, $media_id, DOKU_CHANGE_TYPE_CREATE, $lang['created'], '', null, $sizechange);
+				}
+			}
             if($action == 'get'){
+				if (!file_exists($fl)) return;
                 // Return image in the base64 for draw.io
                 $json = new JSON();
-                header('Content-Type: application/json');
-                $fc = file_get_contents($file_path);
-                echo $json->encode(array("content" => "data:image/png;base64,".base64_encode($fc)));
+                header('Content-Type: application/json');				
+                //$fc = file_get_contents($file_path);
+                $fc = file_get_contents($fl);
+				echo $json->encode(array("content" => "data:image/png;base64,".base64_encode($fc)));
             }
         }
-
     }
 ?>
