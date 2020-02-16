@@ -68,6 +68,7 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         if ($mode !== 'xhtml') {
             return false;
         }
+		$renderer->nocache();
 
         // Validate that the image exists otherwise pring a default image
         global $conf;
@@ -92,4 +93,3 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         return true;
     }
 }
-
