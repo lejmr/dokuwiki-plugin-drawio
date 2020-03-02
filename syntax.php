@@ -72,23 +72,24 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
 
         // Validate that the image exists otherwise pring a default image
         global $conf;
-        //$image_in_mediadir = join("/", array($conf['mediadir'], trim(str_replace(":","/",$data), "/") ));
 		$media_id = $data . '.png';
-
-		$image_in_mediadir = mediaFN($media_id);
-		$id = cleanID($data);
-
-        if(!file_exists($image_in_mediadir)){
-            $renderer->doc .= "<img class='mediacenter' id='".trim($data)."' 
+		
+		$current_id = getID();
+		$current_ns = getNS($current_id);
+		
+		resolve_mediaid($current_ns, $media_id, $exists);
+		$diagram_id = substr($media_id, 0, -4);
+		
+        if(!$exists){
+            $renderer->doc .= "<img class='mediacenter' id='".$diagram_id."' 
                         style='max-width:100%;cursor:pointer;' onclick='edit(this);'
                         src='".DOKU_BASE."lib/plugins/drawio/blank-image.png' 
                         alt='".$media_id."' />";
-            // $renderer->doc = $image_in_mediadir;
             return true;
         }
-        $renderer->doc .= "<img class='mediacenter' id='".trim($data)."' 
+        $renderer->doc .= "<img class='mediacenter' id='".$diagram_id."' 
                         style='max-width:100%;cursor:pointer;' onclick='edit(this);'
-						src='".DOKU_BASE."lib/exe/fetch.php?media=".$data.".png' 
+						src='".DOKU_BASE."lib/exe/fetch.php?media=".$media_id."' 
                         alt='".$media_id."' />";
         return true;
     }
