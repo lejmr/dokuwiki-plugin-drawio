@@ -37,6 +37,7 @@ function edit_cb(image)
 
     var draft = localStorage.getItem('.draft-' + name);
 
+    // Prefer the draft from browser cache
     if(draft == null){
         // Try to find on-disk stored draft file
         jQuery.post(
@@ -48,10 +49,11 @@ function edit_cb(image)
             },
             function(data) {
                 if (data.content != 'NaN') {
-                    // Convert to string
-                    draft = data + "";
+                    
+                    // Set draft from received data
+                    draft = data;
 
-                    // Handle the discard
+                    // Handle the discard - remove on disk
                     if (!confirm("A version of this diagram from " + new Date(data.lastModified) + " is available. Would you like to continue editing?"))
                     {   
                         // clean draft variable
@@ -70,10 +72,10 @@ function edit_cb(image)
                 }
             }
         );
-    }
-                
-    if (draft != null)
+    } 
+    else 
     {
+
         draft = JSON.parse(draft);
                     
         if (!confirm("A version of this diagram from " + new Date(draft.lastModified) + " is available. Would you like to continue editing?"))
