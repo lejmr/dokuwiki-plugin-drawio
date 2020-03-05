@@ -45,6 +45,22 @@ function edit_cb(image)
         {
             draft = null;
         }
+    }else{
+
+        // Try to find on-disk stored draft file
+        jQuery.post(
+            DOKU_BASE + 'lib/exe/ajax.php',
+            {
+                call: 'plugin_drawio', 
+                imageName: imagePointer.getAttribute('id'),
+                action: 'draft_get'
+            },
+            function(data) {
+                if (data != 'NaN') return;
+                draft = data.content;
+            }
+        );
+
     }
     
     var receive = function(evt)
@@ -97,6 +113,17 @@ function edit_cb(image)
                         action: 'save'
                     }
                 );
+
+                // Remove all draft files
+                jQuery.post(
+                    DOKU_BASE + 'lib/exe/ajax.php',
+                    {
+                        call: 'plugin_drawio', 
+                        imageName: imagePointer.getAttribute('id'),
+                        content: msg.xml,
+                        action: 'rmdraft'
+                    }
+                );
                 
                 // Clean cache of this page
                 var url = new URL(window.location.href);
@@ -106,12 +133,34 @@ function edit_cb(image)
             else if (msg.event == 'autosave')
             {
                 localStorage.setItem('.draft-' + name, JSON.stringify({lastModified: new Date(), xml: msg.xml}));
+
+                // Save on-disk
+                jQuery.post(
+                    DOKU_BASE + 'lib/exe/ajax.php',
+                    {
+                        call: 'plugin_drawio', 
+                        imageName: imagePointer.getAttribute('id'),
+                        content: msg.xml,
+                        action: 'autosave'
+                    }
+                );
             }
             else if (msg.event == 'save')
             {
                 iframe.contentWindow.postMessage(JSON.stringify({action: 'export',
                     format: 'xmlpng', xml: msg.xml, spin: 'Updating page'}), '*');
                 localStorage.setItem('.draft-' + name, JSON.stringify({lastModified: new Date(), xml: msg.xml}));
+
+                // Save on-disk
+                jQuery.post(
+                    DOKU_BASE + 'lib/exe/ajax.php',
+                    {
+                        call: 'plugin_drawio', 
+                        imageName: imagePointer.getAttribute('id'),
+                        content: msg.xml,
+                        action: 'autosave'
+                    }
+                );
             }
             else if (msg.event == 'exit')
             {
