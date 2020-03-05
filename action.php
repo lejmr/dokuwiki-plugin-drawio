@@ -121,11 +121,13 @@
                 // prepare directory
                 io_createNamespace($media_id, 'media');
                 
-                // Write content to file
+                // Format content of draft file
+                $json = new JSON();
                 $content = $INPUT->str('content');
-                //$whandle = fopen($file_path,'w');
+                
+                // Write content to file
                 $whandle = fopen($fl, 'w');
-                fwrite($whandle,base64_decode($content));
+                fwrite($whandle, $content);
                 fclose($whandle);
             }
             if($action == 'draft_rm'){
@@ -135,8 +137,7 @@
                 header('Content-Type: application/json');	
                 $json = new JSON();
                 if (file_exists($fl)){
-                    $fc = file_get_contents($fl);
-                    echo $json->encode(array("content" => $fc));
+                    echo file_get_contents($fl);
                 }else {
                     echo $json->encode(array("content" => "NaN"));
                 }

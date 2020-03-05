@@ -36,17 +36,8 @@ function edit_cb(image)
     };
 
     var draft = localStorage.getItem('.draft-' + name);
-                
-    if (draft != null)
-    {
-        draft = JSON.parse(draft);
-                    
-        if (!confirm("A version of this page from " + new Date(draft.lastModified) + " is available. Would you like to continue editing?"))
-        {
-            draft = null;
-        }
-    }else{
 
+    if(draft == null){
         // Try to find on-disk stored draft file
         jQuery.post(
             DOKU_BASE + 'lib/exe/ajax.php',
@@ -56,11 +47,39 @@ function edit_cb(image)
                 action: 'draft_get'
             },
             function(data) {
-                if (data != 'NaN') return;
-                draft = data.content;
+                if (data.content != 'NaN') {
+                    // Convert to string
+                    draft = data + "";
+
+                    // Handle the discard
+                    if (!confirm("A version of this diagram from " + new Date(data.lastModified) + " is available. Would you like to continue editing?"))
+                    {   
+                        // clean draft variable
+                        draft = null;
+
+                         // Remove all draft files
+                        jQuery.post(
+                            DOKU_BASE + 'lib/exe/ajax.php',
+                            {
+                                call: 'plugin_drawio', 
+                                imageName: imagePointer.getAttribute('id'),
+                                action: 'draft_rm'
+                            }
+                        );
+                    }
+                }
             }
         );
-
+    }
+                
+    if (draft != null)
+    {
+        draft = JSON.parse(draft);
+                    
+        if (!confirm("A version of this diagram from " + new Date(draft.lastModified) + " is available. Would you like to continue editing?"))
+        {
+            draft = null;
+        }
     }
     
     var receive = function(evt)
@@ -131,7 +150,8 @@ function edit_cb(image)
             }
             else if (msg.event == 'autosave')
             {
-                localStorage.setItem('.draft-' + name, JSON.stringify({lastModified: new Date(), xml: msg.xml}));
+                dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
+                localStorage.setItem('.draft-' + name, dr);
 
                 // Save on-disk
                 jQuery.post(
@@ -139,7 +159,7 @@ function edit_cb(image)
                     {
                         call: 'plugin_drawio', 
                         imageName: imagePointer.getAttribute('id'),
-                        content: msg.xml,
+                        content: dr,
                         action: 'draft_save'
                     }
                 );
@@ -148,7 +168,8 @@ function edit_cb(image)
             {
                 iframe.contentWindow.postMessage(JSON.stringify({action: 'export',
                     format: 'xmlpng', xml: msg.xml, spin: 'Updating page'}), '*');
-                localStorage.setItem('.draft-' + name, JSON.stringify({lastModified: new Date(), xml: msg.xml}));
+                dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
+                localStorage.setItem('.draft-' + name, dr);
 
                 // Save on-disk
                 jQuery.post(
@@ -156,7 +177,7 @@ function edit_cb(image)
                     {
                         call: 'plugin_drawio', 
                         imageName: imagePointer.getAttribute('id'),
-                        content: msg.xml,
+                        content: dr,
                         action: 'draft_save'
                     }
                 );
@@ -165,6 +186,18 @@ function edit_cb(image)
             {
                 localStorage.removeItem('.draft-' + name);
                 draft = null;
+
+                // Remove all draft files
+                jQuery.post(
+                    DOKU_BASE + 'lib/exe/ajax.php',
+                    {
+                        call: 'plugin_drawio', 
+                        imageName: imagePointer.getAttribute('id'),
+                        action: 'draft_rm'
+                    }
+                );
+
+                // Final close (dont know why though)
                 close();
             }
         }
