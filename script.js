@@ -120,8 +120,7 @@ function edit_cb(image)
                     {
                         call: 'plugin_drawio', 
                         imageName: imagePointer.getAttribute('id'),
-                        content: msg.xml,
-                        action: 'rmdraft'
+                        action: 'draft_rm'
                     }
                 );
                 
@@ -141,7 +140,7 @@ function edit_cb(image)
                         call: 'plugin_drawio', 
                         imageName: imagePointer.getAttribute('id'),
                         content: msg.xml,
-                        action: 'autosave'
+                        action: 'draft_save'
                     }
                 );
             }
@@ -158,7 +157,7 @@ function edit_cb(image)
                         call: 'plugin_drawio', 
                         imageName: imagePointer.getAttribute('id'),
                         content: msg.xml,
-                        action: 'autosave'
+                        action: 'draft_save'
                     }
                 );
             }
