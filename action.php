@@ -41,8 +41,9 @@
             global $INPUT; //available since release 2012-10-13 "Adora Belle"
             $name = $INPUT->str('imageName');
             $action = $INPUT->str('action');
-			
-			$media_id = $name . '.png';
+            
+            $suffix = strpos($action, "draft_") === 0 ? '.png.draft':'.png';
+			$media_id = $name . $suffix;
 			$media_id = cleanID($media_id);
 			$fl = mediaFN($media_id);
 			
@@ -104,7 +105,7 @@
 				} else {
 					addMediaLogEntry($new, $media_id, DOKU_CHANGE_TYPE_CREATE, $lang['created'], '', null, $sizechange);
 				}
-			}
+            }
             if($action == 'get'){
 				if (!file_exists($fl)) return;
                 // Return image in the base64 for draw.io
@@ -113,6 +114,33 @@
                 //$fc = file_get_contents($file_path);
                 $fc = file_get_contents($fl);
 				echo $json->encode(array("content" => "data:image/png;base64,".base64_encode($fc)));
+            }
+            
+            // Draft section
+            if($action == 'draft_save'){
+                // prepare directory
+                io_createNamespace($media_id, 'media');
+                
+                // Format content of draft file
+                $json = new JSON();
+                $content = $INPUT->str('content');
+                
+                // Write content to file
+                $whandle = fopen($fl, 'w');
+                fwrite($whandle, $content);
+                fclose($whandle);
+            }
+            if($action == 'draft_rm'){
+                unlink($fl);
+            }
+            if($action == 'draft_get'){
+                header('Content-Type: application/json');	
+                $json = new JSON();
+                if (file_exists($fl)){
+                    echo file_get_contents($fl);
+                }else {
+                    echo $json->encode(array("content" => "NaN"));
+                }
             }
         }
     }

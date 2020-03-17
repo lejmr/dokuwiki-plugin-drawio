@@ -36,12 +36,49 @@ function edit_cb(image)
     };
 
     var draft = localStorage.getItem('.draft-' + name);
-                
-    if (draft != null)
+
+    // Prefer the draft from browser cache
+    if(draft == null){
+        // Try to find on-disk stored draft file
+        jQuery.post(
+            DOKU_BASE + 'lib/exe/ajax.php',
+            {
+                call: 'plugin_drawio', 
+                imageName: imagePointer.getAttribute('id'),
+                action: 'draft_get'
+            },
+            function(data) {
+                if (data.content != 'NaN') {
+                    
+                    // Set draft from received data
+                    draft = data;
+
+                    // Handle the discard - remove on disk
+                    if (!confirm("A version of this diagram from " + new Date(data.lastModified) + " is available. Would you like to continue editing?"))
+                    {   
+                        // clean draft variable
+                        draft = null;
+
+                         // Remove all draft files
+                        jQuery.post(
+                            DOKU_BASE + 'lib/exe/ajax.php',
+                            {
+                                call: 'plugin_drawio', 
+                                imageName: imagePointer.getAttribute('id'),
+                                action: 'draft_rm'
+                            }
+                        );
+                    }
+                }
+            }
+        );
+    } 
+    else 
     {
+
         draft = JSON.parse(draft);
                     
-        if (!confirm("A version of this page from " + new Date(draft.lastModified) + " is available. Would you like to continue editing?"))
+        if (!confirm("A version of this diagram from " + new Date(draft.lastModified) + " is available. Would you like to continue editing?"))
         {
             draft = null;
         }
@@ -97,6 +134,16 @@ function edit_cb(image)
                         action: 'save'
                     }
                 );
+
+                // Remove all draft files
+                jQuery.post(
+                    DOKU_BASE + 'lib/exe/ajax.php',
+                    {
+                        call: 'plugin_drawio', 
+                        imageName: imagePointer.getAttribute('id'),
+                        action: 'draft_rm'
+                    }
+                );
                 
                 // Clean cache of this page
                 var url = new URL(window.location.href);
@@ -105,18 +152,54 @@ function edit_cb(image)
             }
             else if (msg.event == 'autosave')
             {
-                localStorage.setItem('.draft-' + name, JSON.stringify({lastModified: new Date(), xml: msg.xml}));
+                dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
+                localStorage.setItem('.draft-' + name, dr);
+
+                // Save on-disk
+                jQuery.post(
+                    DOKU_BASE + 'lib/exe/ajax.php',
+                    {
+                        call: 'plugin_drawio', 
+                        imageName: imagePointer.getAttribute('id'),
+                        content: dr,
+                        action: 'draft_save'
+                    }
+                );
             }
             else if (msg.event == 'save')
             {
                 iframe.contentWindow.postMessage(JSON.stringify({action: 'export',
                     format: 'xmlpng', xml: msg.xml, spin: 'Updating page'}), '*');
-                localStorage.setItem('.draft-' + name, JSON.stringify({lastModified: new Date(), xml: msg.xml}));
+                dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
+                localStorage.setItem('.draft-' + name, dr);
+
+                // Save on-disk
+                jQuery.post(
+                    DOKU_BASE + 'lib/exe/ajax.php',
+                    {
+                        call: 'plugin_drawio', 
+                        imageName: imagePointer.getAttribute('id'),
+                        content: dr,
+                        action: 'draft_save'
+                    }
+                );
             }
             else if (msg.event == 'exit')
             {
                 localStorage.removeItem('.draft-' + name);
                 draft = null;
+
+                // Remove all draft files
+                jQuery.post(
+                    DOKU_BASE + 'lib/exe/ajax.php',
+                    {
+                        call: 'plugin_drawio', 
+                        imageName: imagePointer.getAttribute('id'),
+                        action: 'draft_rm'
+                    }
+                );
+
+                // Final close (dont know why though)
                 close();
             }
         }
