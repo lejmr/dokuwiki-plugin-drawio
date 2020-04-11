@@ -1,5 +1,18 @@
 // Embeded editor
 var editor = 'https://www.draw.io/?embed=1&ui=atlas&spin=1&proto=json';
+
+// Default namespace for drawio images
+var imageNameSpaceTemplate = '{PAGE_NAMESPACE}:drawio'; //A subdirectory for drawio images. Example: myproject:myprojectpage:drawio
+//var imageNameSpaceTemplate = 'drawio:{PAGE_NAMESPACE}'; //A global directory for images, and a subdirectory for every project
+//var imageNameSpaceTemplate = '{PAGE_NAMESPACE}'; //Images are recorded in the page directory. Example: myproject:myprojectpage 
+
+// Default prefix filename for drawio images
+var imageNamePrefix = 'diagram_'; //Every image filename begins with
+
+// Default suffix filename for drawio images
+var imageNameSuffixTemplate = '{DATETIME}'; //Every image filename ends with date+time 
+//var imageNameSuffixTemplate = '01';
+
 var initial = null;
 var name = null;
 var imagePointer = null;
@@ -212,9 +225,12 @@ function edit_cb(image)
 
 // Toolbar menu items
 function getImageName(){
-    seq = JSINFO.id.split(":");
-    seq = seq.slice(0,seq.length-1);
-    seq.push("diagram1");
+    var dateTimeString = (new Date(Date.now()-(new Date()).getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace(/[^0-9]/g, "-"); //2020-04-11-19-15-30 
+
+    var imageNameSpace = imageNameSpaceTemplate.replace('{PAGE_NAMESPACE}', JSINFO.id); 
+    seq = imageNameSpace.split(":");
+    var imageNameSuffix = imageNameSuffixTemplate.replace('{DATETIME}', dateTimeString); 
+    seq.push(imageNamePrefix + imageNameSuffix);
     return seq.join(":");
 }
 
@@ -224,8 +240,7 @@ if (typeof window.toolbar !== 'undefined') {
         title: "",
         icon: "../../plugins/drawio/icon.png",
         key: "",
-        // open: "{{drawio>" + JSINFO.id + "}}",
-        open: "{{drawio>" + getImageName() + "}}",
+        open: "{{drawio>" + getImageName() + "}}\n",
         close: ""
     };
 };
