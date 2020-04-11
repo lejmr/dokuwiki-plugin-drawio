@@ -68,29 +68,47 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         if ($mode !== 'xhtml') {
             return false;
         }
-		$renderer->nocache();
+        $renderer->nocache();
 
-        // Validate that the image exists otherwise pring a default image
+        // If ACLs plugin activated, image can be edited only if page can be 
+        $edit_img = true;
+        global $INFO;
+        if (isset($INFO)) {
+            $edit_img = false;
+            if ($INFO['writable'] && !$INFO['rev']) {
+                $edit_img = true;
+            }
+        }
+
+        // Validate that the image exists otherwise print a default image
         global $conf;
-		$media_id = $data . '.png';
+        $media_id = $data . '.png';
 		
-		$current_id = getID();
-		$current_ns = getNS($current_id);
+        $current_id = getID();
+        $current_ns = getNS($current_id);
 		
-		resolve_mediaid($current_ns, $media_id, $exists);
-		$diagram_id = substr($media_id, 0, -4);
+        resolve_mediaid($current_ns, $media_id, $exists);
+        $diagram_id = substr($media_id, 0, -4);
 		
         if(!$exists){
-            $renderer->doc .= "<img class='mediacenter' id='".$diagram_id."' 
-                        style='max-width:100%;cursor:pointer;' onclick='edit(this);'
-                        src='".DOKU_BASE."lib/plugins/drawio/blank-image.png' 
-                        alt='".$media_id."' />";
+            if ($edit_img) {
+                $renderer->doc .= "<img class='mediacenter' id='".$diagram_id."' 
+                style='max-width:100%;cursor:pointer;' onclick='edit(this);'
+                src='".DOKU_BASE."lib/plugins/drawio/blank-image.png' 
+                alt='".$media_id."' />";
+            }
             return true;
         }
-        $renderer->doc .= "<img class='mediacenter' id='".$diagram_id."' 
-                        style='max-width:100%;cursor:pointer;' onclick='edit(this);'
-						src='".DOKU_BASE."lib/exe/fetch.php?media=".$media_id."' 
-                        alt='".$media_id."' />";
+	
+        $renderer->doc .= "<img class='mediacenter' id='".$diagram_id."'"; 
+        $renderer->doc .= "src='".DOKU_BASE."lib/exe/fetch.php?media=".$media_id."'"; 
+        if ($edit_img) {
+            $renderer->doc .= "style='max-width:100%;cursor:pointer'; onclick='edit(this);'";
+        }
+        else {
+            $renderer->doc .= "style='max-width:100%';";
+        }
+        $renderer->doc .= "alt='".$media_id."' />";
         return true;
     }
 }
