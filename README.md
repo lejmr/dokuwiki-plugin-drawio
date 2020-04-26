@@ -30,6 +30,15 @@ GNU General Public License for more details.
 See the LICENSING file for details
 ```
 
+## Before you open a PR or an Issue
+
+I am very grateful for all contribution, but before you open a PR or an Issue please make sure your contribution works. Very important aspect of all contributions is that they are solving problem that anybody can have not that you are solving your particular problem which you do not want to support on your own, so you rather choose to dump it over to the upstream repository. I am sorry I am not keen to support your technical dept. When you are opening an issue for a missing functionality, please reconcile whether are you willing to implement the feauture or not. Don't get it that you must implement it all the time, sometimes you have a great idea that should be implemented, but you don't have the right skill-set. In such a case open an issue and detail the feature, so that the feature can be reviewed and implemented by somebody else. In special cases I can commit to implement it. Generally, this is a non-profit area for me, so please do not expect I am going to be implementing anything for free. 
+
+Regarding to bugs. I prefer pull-requests rather than issues, as I am not going to be fixing any bug unless the bug is breaking my personal wiki page.
+
+I am using labels for Issue for the ones that I would like to be implemented by somebody else. The un-labeled issues became stale or removed.
+
+
 ## Roadmap
 
 This project is completely OpenSource and maintained in my free time, so I can NOT provide any ETA when certain functionality is implemented. The future tasks i would like to be working on are labeled as *enhacement* in the Issues page of this project: 
