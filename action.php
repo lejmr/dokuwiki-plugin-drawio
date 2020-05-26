@@ -10,7 +10,7 @@
     class action_plugin_drawio extends DokuWiki_Action_Plugin {
 
         public function register(Doku_Event_Handler $controller) {
-	        $controller->register_hook('DOKUWIKI_STARTED', 'AFTER', $this, 'addjsinfo');
+            $controller->register_hook('DOKUWIKI_STARTED', 'AFTER', $this, 'addjsinfo');
             $controller->register_hook('AJAX_CALL_UNKNOWN', 'BEFORE', $this,'_ajax_call');
             // $controller->register_hook('TOOLBAR_DEFINE', 'AFTER', $this, 'insert_button', array ());
         }
