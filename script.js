@@ -23,11 +23,17 @@ function edit(image)
 
 function edit_cb(image)
 {
+    var zIndex = 999;
+    if(JSINFO && JSINFO['plugin_drawio']){
+        zIndex = JSINFO['plugin_drawio']['zIndex'];
+    }
+
     imagePointer = image;
 
     var iframe = document.createElement('iframe');
     iframe.setAttribute('frameborder', '0');
     iframe.setAttribute('class', 'drawio');
+    iframe.setAttribute('style', 'z-index: ' + zIndex + ';');
 
     var close = function()
     {
