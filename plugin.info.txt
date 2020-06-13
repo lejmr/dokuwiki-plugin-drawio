@@ -1,7 +1,7 @@
 base   drawio
 author Milos Kozak
 email  milos.kozak@lejmr.com
-date   2020-04-26
+date   2020-06-16
 name   Draw.io plugin
 desc   Draw.io integration
 url    https://www.dokuwiki.org/plugin:drawio
