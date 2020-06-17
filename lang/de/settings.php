@@ -1,6 +1,6 @@
 <?php
 /**
- * English language file for config
+ * German language file for config
  *
  */
 
