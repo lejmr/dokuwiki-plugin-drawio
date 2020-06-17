@@ -1,5 +1,6 @@
 // Embeded editor
-var editor = 'https://www.draw.io/?embed=1&ui=atlas&spin=1&proto=json';
+////var editor = 'https://www.draw.io/?embed=1&ui=atlas&spin=1&proto=json';
+var editor= JSINFO['plugin_drawio']['url'] + '?embed=1&ui=atlas&spin=1&proto=json';
 var initial = null;
 var name = null;
 var imagePointer = null;
