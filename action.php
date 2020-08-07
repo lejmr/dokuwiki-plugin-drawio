@@ -33,7 +33,8 @@
 	    function addjsinfo($event, $params){
             global $JSINFO;
 	        $JSINFO['plugin_drawio'] = array(
-                'zIndex' => $this->getConf('zIndex')
+                'zIndex' => $this->getConf('zIndex'),
+                'url' => $this->getConf('url')
             );
 	    }
 
