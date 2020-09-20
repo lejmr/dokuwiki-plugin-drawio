@@ -2,10 +2,13 @@ version: "3.3"
 services:
 
   dokuwiki:
+    user: root
+    #privileged: true
     environment:
       - DOKUWIKI_PASSWORD=password
-    image: bitnami/dokuwiki:latest
+    #image: bitnami/dokuwiki:20180422
+    image: bitnami/dokuwiki:20200729
     ports:
-      - "8080:80"
+      - "8080:8080"
     volumes:
       - $PWD:/bitnami/dokuwiki/lib/plugins/drawio
