@@ -5,5 +5,5 @@
  */
 
 $conf['zIndex']    = 999;
-$conf['url']       = 'https://www.draw.io';
+$conf['url']       = 'https://embed.diagrams.net/';
 
