@@ -72,22 +72,21 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
 
         // Validate that the image exists otherwise pring a default image
         global $conf;
-		$media_id = $data . '.png';
+		$media_id = $data;
 		
 		$current_id = getID();
 		$current_ns = getNS($current_id);
 		
 		resolve_mediaid($current_ns, $media_id, $exists);
-		$diagram_id = substr($media_id, 0, -4);
-		
+				
         if(!$exists){
-            $renderer->doc .= "<img class='mediacenter' id='".$diagram_id."' 
+            $renderer->doc .= "<img class='mediacenter' id='".$media_id."' 
                         style='max-width:100%;cursor:pointer;' onclick='edit(this);'
                         src='".DOKU_BASE."lib/plugins/drawio/blank-image.png' 
                         alt='".$media_id."' />";
             return true;
         }
-        $renderer->doc .= "<img class='mediacenter' id='".$diagram_id."' 
+        $renderer->doc .= "<img class='mediacenter' id='".$media_id."' 
                         style='max-width:100%;cursor:pointer;' onclick='edit(this);'
 						src='".DOKU_BASE."lib/exe/fetch.php?media=".$media_id."' 
                         alt='".$media_id."' />";

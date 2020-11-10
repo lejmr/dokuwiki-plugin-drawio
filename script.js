@@ -6,7 +6,8 @@ var name = null;
 var imagePointer = null;
 
 function edit(image)
-{
+{   
+    // check auth
     var imgPointer = image;
     jQuery.post(
         DOKU_BASE + 'lib/exe/ajax.php',
@@ -30,6 +31,7 @@ function edit_cb(image)
     }
 
     imagePointer = image;
+    imageFormat = imagePointer.getAttribute('id').split('.').pop();
 
     var iframe = document.createElement('iframe');
     iframe.setAttribute('frameborder', '0');
@@ -41,7 +43,7 @@ function edit_cb(image)
         window.removeEventListener('message', receive);
         document.body.removeChild(iframe);
     };
-
+    
     var draft = localStorage.getItem('.draft-' + name);
 
     // Prefer the draft from browser cache
@@ -96,40 +98,79 @@ function edit_cb(image)
         if (evt.data.length > 0)
         {
             var msg = JSON.parse(evt.data);
-			
+			// wait for init msg
             if (msg.event == 'init')
             {
-                if (draft != null)
+                if (draft != null) // send draft 
                 {
                     iframe.contentWindow.postMessage(JSON.stringify({action: 'load',
                         autosave: 1, xml: draft.xml}), '*');
                     iframe.contentWindow.postMessage(JSON.stringify({action: 'status',
                         modified: true}), '*');
                 }
-                else
-                {
-                    jQuery.post(
-                        DOKU_BASE + 'lib/exe/ajax.php',
-                        {
-                            call: 'plugin_drawio', 
-                            imageName: imagePointer.getAttribute('id'),
-                            action: 'get'
-                        },
-                        function(data){
-                            iframe.contentWindow.postMessage(JSON.stringify({action: 'load',
-                                autosave: 1, xmlpng: data.content}), '*');
-                        }
-                    );
-					
+                else // get local image
+                {                    
+                    if (imageFormat == 'png')
+                    {
+                        jQuery.post(
+                            DOKU_BASE + 'lib/exe/ajax.php',
+                            {
+                                call: 'plugin_drawio', 
+                                imageName: imagePointer.getAttribute('id'),
+                                action: 'get_png'
+                            },
+                            function(data){
+                                iframe.contentWindow.postMessage(JSON.stringify({action: 'load',
+                                    autosave: 1, xmlpng: data.content}), '*');
+                            }
+                        );
+                    }
+                    else if (imageFormat == 'svg')
+                    {
+                        jQuery.post(
+                            DOKU_BASE + 'lib/exe/ajax.php',
+                            {
+                                call: 'plugin_drawio', 
+                                imageName: imagePointer.getAttribute('id'),
+                                action: 'get_svg'
+                            },
+                            function(data){
+                                //var svg = new XMLSerializer().serializeToString(data.content.firstChild);
+                                iframe.contentWindow.postMessage(JSON.stringify({action: 'load',
+                                    autosave: 1, xml: data.content}), '*');
+                            }
+                        );
+                    }
+					else {
+                        console.log('error');
+                    }
                 }
             }
             else if (msg.event == 'export')
             {
-                image.setAttribute('src', msg.data);
-                localStorage.setItem(name, JSON.stringify({lastModified: new Date(), data: msg.data}));
+                imgData=null;
+                if(msg.format == 'xmlpng')
+                {
+                    imgData = msg.data ;
+                    image.setAttribute('src', imgData);
+                    imgSrc=image.getAttribute('src');
+                    imgSrc=imgSrc.replace('plugins/drawio/blank-image.png','exe/fetch.php?media=');
+                }
+                else if (msg.format == 'svg') 
+                {
+                    // Extracts SVG DOM from data URI to enable links
+                    imgData = atob(msg.data.substring(msg.data.indexOf(',') + 1));
+                    var tdElement = document.getElementById(image.id);
+                    var trElement=  tdElement.parentNode;
+                    trElement.removeChild(tdElement);
+                    trElement.innerHTML = imgData + trElement.innerHTML;
+                    trElement.style.textAlign = "center" ;
+                }
+                
+                localStorage.setItem(name, JSON.stringify({lastModified: new Date(), data: imgData}));
                 localStorage.removeItem('.draft-' + name);
                 draft = null;
-                close();
+				close();
 
                 // Save into dokuwiki
                 jQuery.post(
@@ -156,6 +197,7 @@ function edit_cb(image)
                 var url = new URL(window.location.href);
                 url.searchParams.set('purge', 'true');
                 jQuery.get(url);
+                
             }
             else if (msg.event == 'autosave')
             {
@@ -175,11 +217,21 @@ function edit_cb(image)
             }
             else if (msg.event == 'save')
             {
-                iframe.contentWindow.postMessage(JSON.stringify({action: 'export',
+                
+                if (imageFormat === 'png')
+                {
+                    iframe.contentWindow.postMessage(JSON.stringify({action: 'export',
                     format: 'xmlpng', xml: msg.xml, spin: 'Updating page'}), '*');
-                dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
-                localStorage.setItem('.draft-' + name, dr);
-
+                    dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
+                    localStorage.setItem('.draft-' + name, dr);
+                } 
+                else if (imageFormat ==='svg') 
+                {
+                    iframe.contentWindow.postMessage(JSON.stringify({action: 'export',
+                    format: 'xmlsvg', xml: msg.xml, spin: 'Updating page'}), '*');
+                    dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
+                    localStorage.setItem('.draft-' + name, dr);
+                }
                 // Save on-disk
                 jQuery.post(
                     DOKU_BASE + 'lib/exe/ajax.php',
@@ -221,7 +273,7 @@ function edit_cb(image)
 function getImageName(){
     seq = JSINFO.id.split(":");
     seq = seq.slice(0,seq.length-1);
-    seq.push("diagram1");
+    seq.push("diagram1.svg");
     return seq.join(":");
 }
 

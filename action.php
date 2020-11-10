@@ -55,8 +55,8 @@
             $name = $INPUT->str('imageName');
             $action = $INPUT->str('action');
             
-            $suffix = strpos($action, "draft_") === 0 ? '.png.draft':'.png';
-			$media_id = $name . $suffix;
+            $suffix = strpos($action, "draft_") === 0 ? '.draft':'';
+            $media_id = $name . $suffix;
 			$media_id = cleanID($media_id);
 			$fl = mediaFN($media_id);
 			
@@ -117,9 +117,9 @@
 				    addMediaLogEntry($new, $media_id, DOKU_CHANGE_TYPE_EDIT, '', '', null, $sizechange);
 				} else {
 					addMediaLogEntry($new, $media_id, DOKU_CHANGE_TYPE_CREATE, $lang['created'], '', null, $sizechange);
-				}
+                }
             }
-            if($action == 'get'){
+            if($action == 'get_png'){
 				if (!file_exists($fl)) return;
                 // Return image in the base64 for draw.io
                 $json = new JSON();
@@ -127,6 +127,15 @@
                 //$fc = file_get_contents($file_path);
                 $fc = file_get_contents($fl);
 				echo $json->encode(array("content" => "data:image/png;base64,".base64_encode($fc)));
+            }
+            if($action == 'get_svg'){
+				if (!file_exists($fl)) return;
+                // Return image in the base64 for draw.io
+                $json = new JSON();
+                header('Content-Type: application/json');				
+                //$fc = file_get_contents($file_path);
+                $fc = file_get_contents($fl);
+				echo $json->encode(array("content" => "data:image/svg+xml;base64,".base64_encode($fc)));
             }
             
             // Draft section
