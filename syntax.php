@@ -72,7 +72,11 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
 
         // Validate that the image exists otherwise pring a default image
         global $conf;
-		$media_id = $data;
+        $media_id = $data;
+        // if no extention specified, use png
+        if(!in_array(pathinfo($media_id, PATHINFO_EXTENSION),explode(",",$this->getConf('toolbar_possible_extension')) )){
+            $media_id .= ".png";
+        }
 		
 		$current_id = getID();
 		$current_ns = getNS($current_id);

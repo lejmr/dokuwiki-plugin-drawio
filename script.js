@@ -1,6 +1,7 @@
 // Embeded editor
 ////var editor = 'https://www.draw.io/?embed=1&ui=atlas&spin=1&proto=json';
 var editor= JSINFO['plugin_drawio']['url'] + '?embed=1&ui=atlas&spin=1&proto=json';
+var toolbarPossibleExtension=JSINFO['plugin_drawio']['toolbar_possible_extension'];
 var initial = null;
 var name = null;
 var imagePointer = null;
@@ -31,7 +32,16 @@ function edit_cb(image)
     }
 
     imagePointer = image;
-    imageFormat = imagePointer.getAttribute('id').split('.').pop();
+    imageFormat = imagePointer.getAttribute('id').split('.');
+    if (imageFormat.length>2) {
+        alert('File name format or extension error: should be filename.extension (available extension :' + toolbarPossibleExtension + ')');
+        return;
+    } else if (imageFormat.length == 1) {
+        console.info('use default exention png');
+        imageFormat = "png";
+    } else {
+        imageFormat=imageFormat.pop();
+    }
 
     var iframe = document.createElement('iframe');
     iframe.setAttribute('frameborder', '0');
@@ -58,7 +68,7 @@ function edit_cb(image)
             },
             function(data) {
                 if (data.content != 'NaN') {
-                    
+
                     // Set draft from received data
                     draft = data;
 
@@ -142,7 +152,7 @@ function edit_cb(image)
                         );
                     }
 					else {
-                        console.log('error');
+                        console.log('error extension not compatible');
                     }
                 }
             }
@@ -162,8 +172,13 @@ function edit_cb(image)
                     imgData = atob(msg.data.substring(msg.data.indexOf(',') + 1));
                     var tdElement = document.getElementById(image.id);
                     var trElement=  tdElement.parentNode;
-                    trElement.removeChild(tdElement);
-                    trElement.innerHTML = imgData + trElement.innerHTML;
+                    var svgImg= document.createElement('svg');
+                    svgImg.setAttribute("class","mediacenter");
+                    svgImg.setAttribute("style","max-width:100%;cursor:pointer;");
+                    svgImg.setAttribute('onclick','edit(this);');
+                    svgImg.id=image.id;
+                    svgImg.innerHTML=imgData;
+                    trElement.replaceChild(svgImg,tdElement);
                     trElement.style.textAlign = "center" ;
                 }
                 
@@ -273,18 +288,61 @@ function edit_cb(image)
 function getImageName(){
     seq = JSINFO.id.split(":");
     seq = seq.slice(0,seq.length-1);
-    seq.push("diagram1.svg");
+    seq.push("diagram1");
     return seq.join(":");
-}
+};
+
+ function generateToolBar(){
+     var listExt= [];
+     for (extension in toolbarPossibleExtension) {
+         listExt[extension] = {
+             type   : "format",
+             title  : "",
+             icon   : "../../plugins/drawio/icon_" + toolbarPossibleExtension[extension] + ".png" ,
+             open   : "{{drawio>" + getImageName() + "." + toolbarPossibleExtension[extension] + "}}",
+             close  : ""
+            }
+     }
+     return listExt;
+ };
+
 
 if (typeof window.toolbar !== 'undefined') {
-    toolbar[toolbar.length] = {
-        type: "format",
-        title: "",
-        icon: "../../plugins/drawio/icon.png",
-        key: "",
-        // open: "{{drawio>" + JSINFO.id + "}}",
-        open: "{{drawio>" + getImageName() + "}}",
-        close: ""
+    // toobar definition in case of multi extension defined in conf
+    if (toolbarPossibleExtension.length >1 ) {
+        toolbar[toolbar.length] = {
+            type: "picker",
+            title: "",
+            icon: "../../plugins/drawio/icon.png",
+            key: "",
+            class  : "pk_hl",
+            block  : true,
+            list: generateToolBar(),
+            close: ""
     };
+    
+    } else if (toolbarPossibleExtension.length = 1) {
+        // toobar definition in case of only one extension defined
+        if (toolbarPossibleExtension[0] == ""){
+            toolbar[toolbar.length] = {
+                type: "format",
+                title: "",
+                icon: "../../plugins/drawio/icon.png",
+                key: "",
+                open: "{{drawio>" + getImageName() + "}}",
+                close: ""
+            };
+        } else {
+            // toobar definition in case of none extension defined
+            toolbar[toolbar.length] = {
+                type: "format",
+                title: "",
+                icon: "../../plugins/drawio/icon.png",
+                key: "",
+                open: "{{drawio>" + getImageName() + "." + toolbarPossibleExtension[0] + "}}",
+                close: ""
+            };
+        }
+        
+    }
 };

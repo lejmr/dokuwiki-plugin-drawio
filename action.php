@@ -34,7 +34,8 @@
             global $JSINFO;
 	        $JSINFO['plugin_drawio'] = array(
                 'zIndex' => $this->getConf('zIndex'),
-                'url' => $this->getConf('url')
+                'url' => $this->getConf('url'),
+                'toolbar_possible_extension' => explode(",",$this->getConf('toolbar_possible_extension'))
             );
 	    }
 
@@ -54,7 +55,7 @@
             global $INPUT; //available since release 2012-10-13 "Adora Belle"
             $name = $INPUT->str('imageName');
             $action = $INPUT->str('action');
-            
+
             $suffix = strpos($action, "draft_") === 0 ? '.draft':'';
             $media_id = $name . $suffix;
 			$media_id = cleanID($media_id);

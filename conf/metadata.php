@@ -6,4 +6,4 @@
 
 $meta['zIndex']    = array('string');
 $meta['url']       = array('string');
-
+$meta['toolbar_possible_extension']       = array('string');
