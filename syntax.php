@@ -74,7 +74,7 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         global $conf;
         $media_id = $data;
         // if no extention specified, use png
-        if(!in_array(pathinfo($media_id, PATHINFO_EXTENSION),explode(",",$this->getConf('toolbar_possible_extension')) )){
+        if(!in_array(pathinfo($media_id, PATHINFO_EXTENSION),array_map('trim',explode(",",$this->getConf('toolbar_possible_extension'))) )){
             $media_id .= ".png";
         }
 		

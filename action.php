@@ -35,7 +35,7 @@
 	        $JSINFO['plugin_drawio'] = array(
                 'zIndex' => $this->getConf('zIndex'),
                 'url' => $this->getConf('url'),
-                'toolbar_possible_extension' => explode(",",$this->getConf('toolbar_possible_extension'))
+                'toolbar_possible_extension' => array_map('trim', explode(",",$this->getConf('toolbar_possible_extension')))
             );
 	    }
 
