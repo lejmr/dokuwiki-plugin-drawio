@@ -11,4 +11,5 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - $PWD:/bitnami/dokuwiki/lib/plugins/drawio
+      - .:/src
+      - ./docker/entrypoint-dev.sh:/docker-entrypoint-init.d/makesymlink.sh
