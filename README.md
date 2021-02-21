@@ -56,3 +56,11 @@ This is how to start local development server:
 ```docker-compose up```
   
 Wait until server is started, and feel free to login using *superuser:password* credentials and go on and develop. The development server is available at address http://localhost:8080
+
+
+## SVG support related notes
+
+In order to enable svg drawing support make sure:
+* You have installed [svgEmbed Plugin](https://www.dokuwiki.org/plugin:svgembed#Uploading_SVG_files_via_Media_Manager)
+* You enabled svg extension in DokuWiki's Draw.io configuration 
+* You added `svg image/svg+xml` line to conf/mime.local.conf
