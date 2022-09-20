@@ -170,16 +170,18 @@ function edit_cb(image)
                 {
                     // Extracts SVG DOM from data URI to enable links
                     imgData = atob(msg.data.substring(msg.data.indexOf(',') + 1));
-                    var tdElement = document.getElementById(image.id);
-                    var trElement=  tdElement.parentNode;
-                    var svgImg= document.createElement('svg');
-                    svgImg.setAttribute("class","mediacenter");
-                    svgImg.setAttribute("style","max-width:100%;cursor:pointer;");
-                    svgImg.setAttribute('onclick','edit(this);');
-                    svgImg.id=image.id;
-                    svgImg.innerHTML=imgData;
-                    trElement.replaceChild(svgImg,tdElement);
-                    trElement.style.textAlign = "center" ;
+                    var oldSvgElement = document.getElementById(image.id);
+                    var odlSvgParentNode = oldSvgElement.parentNode;
+                    odlSvgParentNode.innerHTML = imgData;
+                    var newSvgElement = odlSvgParentNode.firstElementChild;
+                    var wigth = newSvgElement.getAttribute("width");
+                    var height = newSvgElement.getAttribute("height");
+                    newSvgElement.style.width = wigth;
+                    newSvgElement.style.height = height;
+                    newSvgElement.style.cursor = "pointer";
+                    newSvgElement.setAttribute("class","mediacenter");
+                    newSvgElement.setAttribute('onclick','edit(this);');
+                    newSvgElement.id=image.id;
                 }
                 
                 localStorage.setItem(name, JSON.stringify({lastModified: new Date(), data: imgData}));
