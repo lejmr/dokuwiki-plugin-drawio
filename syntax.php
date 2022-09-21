@@ -67,6 +67,8 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
      */
     public function render($mode, Doku_Renderer $renderer, $data)
     {
+        global $lang;
+
         if ($mode !== 'xhtml') {
             return false;
         }
@@ -99,16 +101,31 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
             $svg->addAttribute("class", "mediacenter");
             $svg->addAttribute("id", $media_id);
             $style = "width:".$width.";height:".$heigth.";";
-            $style .= "cursor:pointer";
+            if(!$this->getConf('edit_button')) {
+                $style .= "cursor:pointer;";
+                $svg->addAttribute("onclick", "edit(this);");
+            }
             $svg->addAttribute("style", $style);
-            $svg->addAttribute("onclick", "edit(this);");
             // we need parent div here to correctly replace the svg after edit
             $renderer->doc .= "<div>".$svg->asXML()."</div>";
         } else {
+            $style = "max-width:100%;";
+            $onclick = "";
+            if(!$this->getConf('edit_button')) {
+                $style .= "cursor:pointer;";
+                $onclick = "onclick='edit(this);";
+            }
             $renderer->doc .= "<img class='mediacenter' id='".$media_id."' 
-                        style='max-width:100%;cursor:pointer;' onclick='edit(this);'
+                        style='".$style."' ".$onclick."'
                         src='".DOKU_BASE."lib/exe/fetch.php?media=".$media_id."' 
                         alt='".$media_id."' />";
+        }
+
+        if($this->getConf('edit_button')) {
+            $renderer->doc .= "<button type='submit' style='display:block;font-size:75%;margin:0.5em auto 0;'
+                            data-image-id='" . $media_id . "' onclick='edit_button(this)'>
+                            ".$lang['btn_secedit']." (draw.io)
+                            </button>";
         }
         return true;
     }

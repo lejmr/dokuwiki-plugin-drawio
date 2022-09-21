@@ -6,6 +6,13 @@ var initial = null;
 var name = null;
 var imagePointer = null;
 
+function edit_button(editButton)
+{
+    var imageId = editButton.getAttribute('data-image-id');
+    var image = document.getElementById(imageId);
+    edit(image);
+}
+
 function edit(image)
 {   
     // check auth
