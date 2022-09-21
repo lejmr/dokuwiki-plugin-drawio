@@ -176,7 +176,12 @@ function edit_cb(image)
                 else if (msg.format == 'svg') 
                 {
                     // Extracts SVG DOM from data URI to enable links
-                    imgData = atob(msg.data.substring(msg.data.indexOf(',') + 1));
+                    var imgBase64 = msg.data.substring(msg.data.indexOf(',') + 1);
+                    // fix utf-8 encoding problem
+                    // https://stackoverflow.com/questions/30106476/using-javascripts-atob-to-decode-base64-doesnt-properly-decode-utf-8-strings
+                    imgData = decodeURIComponent(atob(imgBase64).split('').map(function(c) {
+                        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                    }).join(''));
                     var oldSvgElement = document.getElementById(image.id);
                     var odlSvgParentNode = oldSvgElement.parentNode;
                     odlSvgParentNode.innerHTML = imgData;
