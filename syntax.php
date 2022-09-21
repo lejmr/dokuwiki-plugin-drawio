@@ -122,10 +122,14 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         }
 
         if($this->getConf('edit_button')) {
-            $renderer->doc .= "<button type='submit' style='display:block;font-size:75%;margin:0.5em auto 0;'
+            $auth = auth_quickaclcheck(getNS($media_id).':*');
+            $auth_ow = (($conf['mediarevisions']) ? AUTH_UPLOAD : AUTH_DELETE);
+            if ($auth >= $auth_ow) {
+                $renderer->doc .= "<button type='submit' style='display:block;font-size:75%;margin:0.5em auto 0;'
                             data-image-id='" . $media_id . "' onclick='edit_button(this)'>
                             ".$lang['btn_secedit']." (draw.io)
                             </button>";
+            }
         }
         return true;
     }
