@@ -183,6 +183,7 @@ function edit_cb(image)
                         return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
                     }).join(''));
                     var oldSvgElement = document.getElementById(image.id);
+                    var oldSvgElementOnclick = oldSvgElement.getAttribute("onclick");
                     var odlSvgParentNode = oldSvgElement.parentNode;
                     odlSvgParentNode.innerHTML = imgData;
                     var newSvgElement = odlSvgParentNode.firstElementChild;
@@ -190,9 +191,11 @@ function edit_cb(image)
                     var height = newSvgElement.getAttribute("height");
                     newSvgElement.style.width = wigth;
                     newSvgElement.style.height = height;
-                    newSvgElement.style.cursor = "pointer";
                     newSvgElement.setAttribute("class","mediacenter");
-                    newSvgElement.setAttribute('onclick','edit(this);');
+                    if (oldSvgElementOnclick != null) { // previous svg has onclick property - keep it here
+                        newSvgElement.style.cursor = "pointer";
+                        newSvgElement.setAttribute('onclick', 'edit(this);');
+                    }
                     newSvgElement.id=image.id;
                 }
                 
