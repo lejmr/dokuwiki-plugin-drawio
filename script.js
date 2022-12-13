@@ -1,6 +1,5 @@
 // Embeded editor
-////var editor = 'https://www.draw.io/?embed=1&ui=atlas&spin=1&proto=json';
-var editor= JSINFO['plugin_drawio']['url'] + '?embed=1&ui=atlas&spin=1&proto=json';
+var drawIoEditor= JSINFO['plugin_drawio']['url'] + '?embed=1&ui=atlas&spin=1&proto=json';
 var toolbarPossibleExtension=JSINFO['plugin_drawio']['toolbar_possible_extension'];
 var initial = null;
 var name = null;
@@ -279,7 +278,7 @@ function edit_cb(image)
         }
     };
     window.addEventListener('message', receive);
-    iframe.setAttribute('src', editor);
+    iframe.setAttribute('src', drawIoEditor);
     document.body.appendChild(iframe);
 };
 
