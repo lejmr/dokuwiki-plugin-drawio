@@ -32,11 +32,8 @@ function edit_cb(image)
     }
 
     imagePointer = image;
-    imageFormat = imagePointer.getAttribute('id').split('.');
-    if (imageFormat.length>2) {
-        alert('File name format or extension error: should be filename.extension (available extension :' + toolbarPossibleExtension + ')');
-        return;
-    } else if (imageFormat.length == 1) {
+    imageFormat = imagePointer.getAttribute('id').split(/\.(?=[^.:/]*$)/);
+    if (imageFormat.length == 1) {
         console.info('use default exention png');
         imageFormat = "png";
     } else {
