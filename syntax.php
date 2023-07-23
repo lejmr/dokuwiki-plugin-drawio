@@ -92,7 +92,7 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         }
         $renderer->doc .= "<img class='mediacenter' id='".$media_id."' 
                         style='max-width:100%;cursor:pointer;' onclick='edit(this);'
-						src='".DOKU_BASE."lib/exe/fetch.php?media=".$media_id."' 
+						src='".DOKU_BASE."lib/exe/fetch.php?cache=nocache&media=".$media_id."' 
                         alt='".$media_id."' />";
         return true;
     }
