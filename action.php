@@ -2,6 +2,8 @@
     /*
      * plugin should use this method to register its handlers 
      * with the dokuwiki's event controller
+     * 
+     * 2025-06-05  axel  replace deprecated JSON object; short array syntax
      */
 
     if(!defined('DOKU_INC')) die();
@@ -32,11 +34,11 @@
 
 	    function addjsinfo($event, $params){
             global $JSINFO;
-	        $JSINFO['plugin_drawio'] = array(
+	        $JSINFO['plugin_drawio'] = [
                 'zIndex' => $this->getConf('zIndex'),
                 'url' => $this->getConf('url'),
                 'toolbar_possible_extension' => array_map('trim', explode(",",$this->getConf('toolbar_possible_extension')))
-            );
+            ];
 	    }
 
         /**
@@ -77,14 +79,13 @@
 		
 			// AJAX request
 			if ($action == 'get_auth')
-			{
-                $json = new JSON();
-				echo $json->encode($access_granted);
+            {
+				echo json_encode($access_granted);
 				return;
             }
 						;
 			if (!$access_granted)
-				return array($lang['media_perm_upload'], 0);
+				return [$lang['media_perm_upload'], 0];
 
 			io_makeFileDir($fl);
 		    if($action == 'save'){
@@ -123,20 +124,18 @@
             if($action == 'get_png'){
 				if (!file_exists($fl)) return;
                 // Return image in the base64 for draw.io
-                $json = new JSON();
                 header('Content-Type: application/json');				
                 //$fc = file_get_contents($file_path);
                 $fc = file_get_contents($fl);
-				echo $json->encode(array("content" => "data:image/png;base64,".base64_encode($fc)));
+				echo json_encode(["content" => "data:image/png;base64,".base64_encode($fc)]);
             }
             if($action == 'get_svg'){
 				if (!file_exists($fl)) return;
                 // Return image in the base64 for draw.io
-                $json = new JSON();
                 header('Content-Type: application/json');				
                 //$fc = file_get_contents($file_path);
                 $fc = file_get_contents($fl);
-				echo $json->encode(array("content" => "data:image/svg+xml;base64,".base64_encode($fc)));
+				echo json_encode(["content" => "data:image/svg+xml;base64,".base64_encode($fc)]);
             }
             
             // Draft section
@@ -145,7 +144,6 @@
                 io_createNamespace($media_id, 'media');
                 
                 // Format content of draft file
-                $json = new JSON();
                 $content = $INPUT->str('content');
                 
                 // Write content to file
@@ -158,13 +156,11 @@
             }
             if($action == 'draft_get'){
                 header('Content-Type: application/json');	
-                $json = new JSON();
                 if (file_exists($fl)){
                     echo file_get_contents($fl);
                 }else {
-                    echo $json->encode(array("content" => "NaN"));
+                    echo json_encode(["content" => "NaN"]);
                 }
             }
         }
     }
-?>
