@@ -106,6 +106,13 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         }
 
         $linkonly = in_array('linkonly', $params);
+        $width = $height = null;
+        foreach ($params as $param) {
+            if (preg_match('/^(\d+)(?:x(\d+))?$/', $param, $m)) {
+                $width = $m[1];
+                $height = isset($m[2]) ? $m[2] : null;
+            }
+        }
 
 		$current_id = getID();
 		$current_ns = getNS($current_id);
@@ -147,17 +154,19 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
             return true;
         }
 
-        if(!$exists){
-            $renderer->doc .= "<img class='mediacenter' id='".hsc($media_id)."'
-                        style='max-width:100%;cursor:pointer;' onclick='edit(this);'
-                        src='".DOKU_BASE."lib/plugins/drawio/blank-image.png'
-                        alt='".hsc($media_id)."' />";
-            return true;
+        $style = "max-width:100%;cursor:pointer;";
+        if ($width !== null) {
+            $style .= "width:".$width."px;".($height !== null ? "height:".$height."px;" : "");
         }
+        $alt = $title !== null ? $title : $media_id;
+        $src = $exists
+            ? DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($media_id)
+            : DOKU_BASE."lib/plugins/drawio/blank-image.png";
+
         $renderer->doc .= "<img class='mediacenter' id='".hsc($media_id)."'
-                        style='max-width:100%;cursor:pointer;' onclick='edit(this);'
-						src='".DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($media_id)."'
-                        alt='".hsc($media_id)."' />";
+                        style='".$style."' onclick='edit(this);'
+                        src='".$src."'
+                        alt='".hsc($alt)."'".($title !== null ? " title='".hsc($title)."'" : "")." />";
         return true;
     }
 }

@@ -152,4 +152,37 @@ class syntax_plugin_drawio_test extends DokuWikiTest
 
         $this->assertStringContainsString('>test:missing.png</a>', $html);
     }
+
+    public function testSizeAndTitleParametersAreApplied()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present?200x100|mouse-over text}}');
+
+        $this->assertStringContainsString('max-width:100%', $html);
+        $this->assertStringContainsString('width:200px', $html);
+        $this->assertStringContainsString('height:100px', $html);
+        $this->assertStringContainsString("alt='mouse-over text'", $html);
+        $this->assertStringContainsString("title='mouse-over text'", $html);
+    }
+
+    public function testWidthOnlyParameterIsApplied()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present?200}}');
+
+        $this->assertStringContainsString('width:200px', $html);
+        $this->assertStringNotContainsString('height:', $html);
+    }
+
+    public function testEmptyTitleFallsBackToMediaIdAsAlt()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present|}}');
+
+        $this->assertStringContainsString("alt='test:present.png'", $html);
+        $this->assertStringNotContainsString("alt=''", $html);
+    }
 }

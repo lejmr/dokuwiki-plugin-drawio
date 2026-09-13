@@ -39,3 +39,9 @@ current page name - handy for copy/pasting the same syntax onto many pages.
 ===== 6. Link only, no image (issue #41) =====
 
 {{drawio>test:fresh_diagram?linkonly|edit graph}}
+
+===== 7. Size and title, like normal media (issue #23) =====
+
+{{drawio>test:fresh_diagram?200|mouse-over text}}
+
+{{drawio>test:fresh_diagram?200x100|mouse-over text}}
