@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [master]   # branches are covered by their pull request
   pull_request:
   schedule:
     # Weekly, so a new DokuWiki release that breaks the plugin shows up here
