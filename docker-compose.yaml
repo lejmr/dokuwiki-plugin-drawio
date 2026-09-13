@@ -1,15 +1,21 @@
-version: "3.3"
 services:
-
   dokuwiki:
-    user: root
-    #privileged: true
-    environment:
-      - DOKUWIKI_PASSWORD=password
-    #image: bitnami/dokuwiki:20180422
-    image: bitnami/dokuwiki:20200729
+    build:
+      context: ./docker
+      args:
+        # Which DokuWiki release to develop against. Override with
+        # DW_VERSION=2025-05-14b docker compose up --build
+        DW_VERSION: ${DW_VERSION:-stable}
     ports:
-      - "8080:8080"
+      - "${DW_PORT:-8080}:8080"
     volumes:
+      # Plugin source, live: edit on the host, reload the browser.
       - .:/src
-      - ./docker/entrypoint-dev.sh:/docker-entrypoint-init.d/makesymlink.sh
+      # Seed files are baked into the image too; mounting them means changes
+      # here only need a `docker compose restart`, not a rebuild.
+      - ./docker/seed:/seed:ro
+      # Wiki data survives restarts. Reset with: docker compose down -v
+      - storage:/storage
+
+volumes:
+  storage:

@@ -1,0 +1,24 @@
+====== draw.io plugin test page ======
+
+This page is seeded by the dev docker image. It is the manual test protocol:
+click through it after changing the plugin.
+
+===== 1. New diagram (blank placeholder) =====
+
+A diagram that does not exist yet renders a placeholder image. Clicking it
+opens the editor; saving stores the PNG and the placeholder is replaced.
+
+{{drawio>test:fresh_diagram}}
+
+===== 2. Second diagram (draft isolation, issue #26) =====
+
+Open diagram 1, draw something, close the editor **without** saving, then open
+this one. It must NOT offer the draft of diagram 1.
+
+{{drawio>test:second_diagram}}
+
+===== 3. SVG variant =====
+
+Requires ''toolbar_possible_extension'' to include ''svg''.
+
+{{drawio>test:vector_diagram.svg}}
