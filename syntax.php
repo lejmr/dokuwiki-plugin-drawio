@@ -72,7 +72,19 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
 
         // Validate that the image exists otherwise pring a default image
         global $conf;
-        $media_id = $data;
+
+		$current_id = getID();
+		$current_ns = getNS($current_id);
+		if ($current_ns === false) {
+		    $current_ns = '';
+		}
+
+        // dokuwiki namespace-template placeholders, see https://www.dokuwiki.org/namespace_templates
+        $media_id = str_replace(
+            array('@NS@', '@PAGE@', '@FILE@'),
+            array($current_ns, noNS($current_id), noNS($current_id)),
+            $data
+        );
 
         // e.g. {{drawio>namespace:}} - no diagram name was actually given
         $colon = strrpos($media_id, ':');
@@ -86,9 +98,6 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         if(!in_array(pathinfo($media_id, PATHINFO_EXTENSION),array_map('trim',explode(",",$this->getConf('toolbar_possible_extension'))) )){
             $media_id .= ".png";
         }
-
-		$current_id = getID();
-		$current_ns = getNS($current_id);
 
 		resolve_mediaid($current_ns, $media_id, $exists);
 

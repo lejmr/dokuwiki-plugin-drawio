@@ -94,4 +94,18 @@ class syntax_plugin_drawio_test extends DokuWikiTest
         $this->assertStringNotContainsString('drawio-error', $html);
         $this->assertStringContainsString("id='a.png'", $html);
     }
+
+    public function testNamespaceAndPageNamePlaceholders()
+    {
+        $html = $this->render('{{drawio>@NS@:@PAGE@_diagram}}', 'wiki:some:page');
+
+        $this->assertStringContainsString("id='wiki:some:page_diagram.png'", $html);
+    }
+
+    public function testFilePlaceholderIsAliasForPage()
+    {
+        $html = $this->render('{{drawio>@NS@:@FILE@_diagram}}', 'wiki:some:page');
+
+        $this->assertStringContainsString("id='wiki:some:page_diagram.png'", $html);
+    }
 }

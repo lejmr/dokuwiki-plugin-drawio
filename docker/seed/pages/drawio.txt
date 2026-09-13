@@ -28,3 +28,10 @@ Requires ''toolbar_possible_extension'' to include ''svg''.
 A missing diagram name must show a clear error, not a clickable placeholder.
 
 {{drawio>test:}}
+
+===== 5. Namespace-template placeholders (issue #31) =====
+
+''@NS@'' expands to the current namespace, ''@PAGE@'' (alias ''@FILE@'') to the
+current page name - handy for copy/pasting the same syntax onto many pages.
+
+{{drawio>@NS@:@PAGE@_diagram}}
