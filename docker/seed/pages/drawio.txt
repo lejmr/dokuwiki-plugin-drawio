@@ -22,3 +22,26 @@ this one. It must NOT offer the draft of diagram 1.
 Requires ''toolbar_possible_extension'' to include ''svg''.
 
 {{drawio>test:vector_diagram.svg}}
+
+===== 4. Empty diagram name (issue #15) =====
+
+A missing diagram name must show a clear error, not a clickable placeholder.
+
+{{drawio>test:}}
+
+===== 5. Namespace-template placeholders (issue #31) =====
+
+''@NS@'' expands to the current namespace, ''@PAGE@'' (alias ''@FILE@'') to the
+current page name - handy for copy/pasting the same syntax onto many pages.
+
+{{drawio>@NS@:@PAGE@_diagram}}
+
+===== 6. Link only, no image (issue #41) =====
+
+{{drawio>test:fresh_diagram?linkonly|edit graph}}
+
+===== 7. Size and title, like normal media (issue #23) =====
+
+{{drawio>test:fresh_diagram?200|mouse-over text}}
+
+{{drawio>test:fresh_diagram?200x100|mouse-over text}}

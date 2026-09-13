@@ -75,4 +75,150 @@ class syntax_plugin_drawio_test extends DokuWikiTest
 
         $this->assertStringContainsString('onclick', $html);
     }
+
+    public function testEmptyDiagramNameRendersError()
+    {
+        $html = $this->render('{{drawio>test:}}');
+
+        $this->assertStringContainsString('drawio-error', $html);
+        $this->assertStringNotContainsString('onclick', $html);
+        $this->assertStringNotContainsString('blank-image.png', $html);
+    }
+
+    public function testSingleCharacterNameWithoutNamespaceIsNotTreatedAsEmpty()
+    {
+        // regression: strrpos() returns false with no ':', and false + 1 === 1,
+        // which used to chop the leading character off a namespace-less name
+        $html = $this->render('{{drawio>a}}');
+
+        $this->assertStringNotContainsString('drawio-error', $html);
+        $this->assertStringContainsString("id='a.png'", $html);
+    }
+
+    public function testNamespaceAndPageNamePlaceholders()
+    {
+        $html = $this->render('{{drawio>@NS@:@PAGE@_diagram}}', 'wiki:some:page');
+
+        $this->assertStringContainsString("id='wiki:some:page_diagram.png'", $html);
+    }
+
+    public function testFilePlaceholderIsAliasForPage()
+    {
+        $html = $this->render('{{drawio>@NS@:@FILE@_diagram}}', 'wiki:some:page');
+
+        $this->assertStringContainsString("id='wiki:some:page_diagram.png'", $html);
+    }
+
+    public function testLinkonlyRendersATextLinkInsteadOfAnImage()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present?linkonly|edit graph}}');
+
+        $this->assertStringNotContainsString('<img', $html);
+        $this->assertStringContainsString('<a ', $html);
+        $this->assertStringContainsString('edit graph', $html);
+        $this->assertStringContainsString('fetch.php?media=test:present.png', $html);
+    }
+
+    public function testLinkonlyIdMatchesTheImageIdForTheSameName()
+    {
+        // regression: linkonly used to render before resolve_mediaid() ran,
+        // so it produced a *different*, unresolved id than {{drawio>diagram}}
+        // would for the exact same name on the exact same page
+        $imgHtml = $this->render('{{drawio>diagram}}', 'ns:page');
+        $linkHtml = $this->render('{{drawio>diagram?linkonly|edit}}', 'ns:page');
+
+        $this->assertStringContainsString("id='ns:diagram.png'", $imgHtml);
+        $this->assertStringContainsString("id='ns:diagram.png'", $linkHtml);
+    }
+
+    public function testCraftedNameCannotBreakOutOfTheAttribute()
+    {
+        // a wiki editor fully controls this name - resolve_mediaid()'s cleanID
+        // must run (and hsc() must escape) before any of it reaches an
+        // attribute, on the linkonly path just like on the image path
+        $html = $this->render('{{drawio>a"onmouseover="alert(1)"x?linkonly|click}}');
+
+        $this->assertStringNotContainsString('"onmouseover="', $html);
+        $this->assertStringNotContainsString("'onmouseover='", $html);
+    }
+
+    public function testEmptyTitleFallsBackToMediaIdInLinkonlyText()
+    {
+        // {{drawio>x?linkonly|}} - an empty title is "no title", so the link
+        // text falls back to the media id, same as when no title is given at all
+        $html = $this->render('{{drawio>test:missing?linkonly|}}');
+
+        $this->assertStringContainsString('>test:missing.png</a>', $html);
+    }
+
+    public function testSizeAndTitleParametersAreApplied()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present?200x100|mouse-over text}}');
+
+        $this->assertStringContainsString('max-width:100%', $html);
+        $this->assertStringContainsString('width:200px', $html);
+        $this->assertStringContainsString('height:100px', $html);
+        $this->assertStringContainsString("alt='mouse-over text'", $html);
+        $this->assertStringContainsString("title='mouse-over text'", $html);
+    }
+
+    public function testWidthOnlyParameterIsApplied()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present?200}}');
+
+        $this->assertStringContainsString('width:200px', $html);
+        $this->assertStringNotContainsString('height:', $html);
+    }
+
+    public function testEmptyTitleFallsBackToMediaIdAsAlt()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present|}}');
+
+        $this->assertStringContainsString("alt='test:present.png'", $html);
+        $this->assertStringNotContainsString("alt=''", $html);
+    }
+
+    /**
+     * The media manager lists where a file is used by reading the page's
+     * metadata. Without this the diagram looks unused (#10).
+     */
+    protected function mediaUsedOn($id, $text)
+    {
+        saveWikiText($id, $text, 'drawio test');
+
+        return (array) p_get_metadata($id, 'relation media', METADATA_RENDER_UNLIMITED);
+    }
+
+    public function testDiagramIsRecordedAsMediaUsedOnThePage()
+    {
+        $media = $this->mediaUsedOn('start', '{{drawio>test:tracked}}');
+
+        $this->assertArrayHasKey('test:tracked.png', $media);
+    }
+
+    public function testRelativeDiagramIsRecordedWithItsResolvedId()
+    {
+        $media = $this->mediaUsedOn('wiki:some:page', '{{drawio>tracked}}');
+
+        $this->assertArrayHasKey('wiki:some:tracked.png', $media);
+    }
+
+    public function testEmptyMediaFileFallsBackToPlaceholder()
+    {
+        // issue #66: an empty diagram was saved, leaving a zero-byte file
+        $this->createMedia('test:blank.png', '');
+
+        $html = $this->render('{{drawio>test:blank}}');
+
+        $this->assertStringContainsString('blank-image.png', $html);
+        $this->assertStringContainsString('onclick', $html);
+    }
 }
