@@ -9,3 +9,8 @@ iframe.drawio {
     height:100vh;
     z-index: 999;
 }
+
+.drawio-error {
+    color:#b00;
+    font-style:italic;
+}

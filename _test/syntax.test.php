@@ -75,4 +75,23 @@ class syntax_plugin_drawio_test extends DokuWikiTest
 
         $this->assertStringContainsString('onclick', $html);
     }
+
+    public function testEmptyDiagramNameRendersError()
+    {
+        $html = $this->render('{{drawio>test:}}');
+
+        $this->assertStringContainsString('drawio-error', $html);
+        $this->assertStringNotContainsString('onclick', $html);
+        $this->assertStringNotContainsString('blank-image.png', $html);
+    }
+
+    public function testSingleCharacterNameWithoutNamespaceIsNotTreatedAsEmpty()
+    {
+        // regression: strrpos() returns false with no ':', and false + 1 === 1,
+        // which used to chop the leading character off a namespace-less name
+        $html = $this->render('{{drawio>a}}');
+
+        $this->assertStringNotContainsString('drawio-error', $html);
+        $this->assertStringContainsString("id='a.png'", $html);
+    }
 }

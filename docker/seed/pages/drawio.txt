@@ -22,3 +22,9 @@ this one. It must NOT offer the draft of diagram 1.
 Requires ''toolbar_possible_extension'' to include ''svg''.
 
 {{drawio>test:vector_diagram.svg}}
+
+===== 4. Empty diagram name (issue #15) =====
+
+A missing diagram name must show a clear error, not a clickable placeholder.
+
+{{drawio>test:}}

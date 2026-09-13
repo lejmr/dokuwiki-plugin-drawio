@@ -73,26 +73,35 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         // Validate that the image exists otherwise pring a default image
         global $conf;
         $media_id = $data;
+
+        // e.g. {{drawio>namespace:}} - no diagram name was actually given
+        $colon = strrpos($media_id, ':');
+        $leaf = substr($media_id, $colon === false ? 0 : $colon + 1);
+        if ($leaf === '') {
+            $renderer->doc .= "<span class='drawio-error'>drawio: no diagram name given in '".hsc($data)."'</span>";
+            return true;
+        }
+
         // if no extention specified, use png
         if(!in_array(pathinfo($media_id, PATHINFO_EXTENSION),array_map('trim',explode(",",$this->getConf('toolbar_possible_extension'))) )){
             $media_id .= ".png";
         }
-		
+
 		$current_id = getID();
 		$current_ns = getNS($current_id);
-		
+
 		resolve_mediaid($current_ns, $media_id, $exists);
-				
+
         if(!$exists){
-            $renderer->doc .= "<img class='mediacenter' id='".$media_id."' 
+            $renderer->doc .= "<img class='mediacenter' id='".$media_id."'
                         style='max-width:100%;cursor:pointer;' onclick='edit(this);'
-                        src='".DOKU_BASE."lib/plugins/drawio/blank-image.png' 
+                        src='".DOKU_BASE."lib/plugins/drawio/blank-image.png'
                         alt='".$media_id."' />";
             return true;
         }
-        $renderer->doc .= "<img class='mediacenter' id='".$media_id."' 
+        $renderer->doc .= "<img class='mediacenter' id='".$media_id."'
                         style='max-width:100%;cursor:pointer;' onclick='edit(this);'
-						src='".DOKU_BASE."lib/exe/fetch.php?media=".$media_id."' 
+						src='".DOKU_BASE."lib/exe/fetch.php?media=".$media_id."'
                         alt='".$media_id."' />";
         return true;
     }
