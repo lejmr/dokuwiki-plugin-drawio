@@ -108,4 +108,48 @@ class syntax_plugin_drawio_test extends DokuWikiTest
 
         $this->assertStringContainsString("id='wiki:some:page_diagram.png'", $html);
     }
+
+    public function testLinkonlyRendersATextLinkInsteadOfAnImage()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present?linkonly|edit graph}}');
+
+        $this->assertStringNotContainsString('<img', $html);
+        $this->assertStringContainsString('<a ', $html);
+        $this->assertStringContainsString('edit graph', $html);
+        $this->assertStringContainsString('fetch.php?media=test:present.png', $html);
+    }
+
+    public function testLinkonlyIdMatchesTheImageIdForTheSameName()
+    {
+        // regression: linkonly used to render before resolve_mediaid() ran,
+        // so it produced a *different*, unresolved id than {{drawio>diagram}}
+        // would for the exact same name on the exact same page
+        $imgHtml = $this->render('{{drawio>diagram}}', 'ns:page');
+        $linkHtml = $this->render('{{drawio>diagram?linkonly|edit}}', 'ns:page');
+
+        $this->assertStringContainsString("id='ns:diagram.png'", $imgHtml);
+        $this->assertStringContainsString("id='ns:diagram.png'", $linkHtml);
+    }
+
+    public function testCraftedNameCannotBreakOutOfTheAttribute()
+    {
+        // a wiki editor fully controls this name - resolve_mediaid()'s cleanID
+        // must run (and hsc() must escape) before any of it reaches an
+        // attribute, on the linkonly path just like on the image path
+        $html = $this->render('{{drawio>a"onmouseover="alert(1)"x?linkonly|click}}');
+
+        $this->assertStringNotContainsString('"onmouseover="', $html);
+        $this->assertStringNotContainsString("'onmouseover='", $html);
+    }
+
+    public function testEmptyTitleFallsBackToMediaIdInLinkonlyText()
+    {
+        // {{drawio>x?linkonly|}} - an empty title is "no title", so the link
+        // text falls back to the media id, same as when no title is given at all
+        $html = $this->render('{{drawio>test:missing?linkonly|}}');
+
+        $this->assertStringContainsString('>test:missing.png</a>', $html);
+    }
 }

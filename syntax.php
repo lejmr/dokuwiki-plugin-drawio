@@ -51,7 +51,20 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
      */
     public function handle($match, $state, $pos, Doku_Handler $handler)
     {
-        return substr($match,9,-2); 
+        return substr($match,9,-2);
+    }
+
+    /**
+     * URL-encode a media id for a fetch.php query string, keeping the
+     * namespace separator readable (this mirrors what DokuWiki's own
+     * ml()/idfilter() do for internal media links).
+     *
+     * @param string $media_id
+     * @return string
+     */
+    private function mediaUrl($media_id)
+    {
+        return str_replace('%3A', ':', rawurlencode($media_id));
     }
 
     /**
@@ -72,6 +85,27 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
 
         // Validate that the image exists otherwise pring a default image
         global $conf;
+
+        $data = trim($data);
+
+        // name?params|title - same split as DokuWiki's own {{media}} syntax
+        $title = null;
+        if (($pipe = strpos($data, '|')) !== false) {
+            $title = trim(substr($data, $pipe + 1));
+            $data = substr($data, 0, $pipe);
+        }
+        if ($title === '') {
+            // {{drawio>x|}} - an empty title is "no title", not "no alt text"
+            $title = null;
+        }
+
+        $params = array();
+        if (($qm = strpos($data, '?')) !== false) {
+            $params = array_filter(array_map('trim', explode('&', substr($data, $qm + 1))));
+            $data = substr($data, 0, $qm);
+        }
+
+        $linkonly = in_array('linkonly', $params);
 
 		$current_id = getID();
 		$current_ns = getNS($current_id);
@@ -99,19 +133,31 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
             $media_id .= ".png";
         }
 
+        // resolve_mediaid() cleans/sanitizes $media_id (cleanID) - this MUST run
+        // before the id is ever put into an HTML attribute, on every path,
+        // otherwise a crafted name (e.g. containing a quote) reaches the
+        // markup unsanitized. hsc()/mediaUrl() below are defense in depth on
+        // top of that, not a substitute for it.
 		resolve_mediaid($current_ns, $media_id, $exists);
 
-        if(!$exists){
-            $renderer->doc .= "<img class='mediacenter' id='".$media_id."'
-                        style='max-width:100%;cursor:pointer;' onclick='edit(this);'
-                        src='".DOKU_BASE."lib/plugins/drawio/blank-image.png'
-                        alt='".$media_id."' />";
+        if ($linkonly) {
+            $text = $title !== null ? $title : $media_id;
+            $renderer->doc .= "<a href='".DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($media_id)."' id='".hsc($media_id)."'
+                        class='drawio-linkonly' onclick='edit(this);return false;'>".hsc($text)."</a>";
             return true;
         }
-        $renderer->doc .= "<img class='mediacenter' id='".$media_id."'
+
+        if(!$exists){
+            $renderer->doc .= "<img class='mediacenter' id='".hsc($media_id)."'
                         style='max-width:100%;cursor:pointer;' onclick='edit(this);'
-						src='".DOKU_BASE."lib/exe/fetch.php?media=".$media_id."'
-                        alt='".$media_id."' />";
+                        src='".DOKU_BASE."lib/plugins/drawio/blank-image.png'
+                        alt='".hsc($media_id)."' />";
+            return true;
+        }
+        $renderer->doc .= "<img class='mediacenter' id='".hsc($media_id)."'
+                        style='max-width:100%;cursor:pointer;' onclick='edit(this);'
+						src='".DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($media_id)."'
+                        alt='".hsc($media_id)."' />";
         return true;
     }
 }
