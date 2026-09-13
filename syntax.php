@@ -154,6 +154,13 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
             return true;
         }
 
+        // issue #66: saving an empty diagram leaves a zero-byte media file behind,
+        // which is neither viewable nor (without this) clickable to fix again - treat
+        // it as missing so the placeholder (and its edit link) show up instead.
+        if ($exists && @filesize(mediaFN($media_id)) === 0) {
+            $exists = false;
+        }
+
         $style = "max-width:100%;cursor:pointer;";
         if ($width !== null) {
             $style .= "width:".$width."px;".($height !== null ? "height:".$height."px;" : "");

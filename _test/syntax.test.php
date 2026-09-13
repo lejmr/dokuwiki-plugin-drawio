@@ -185,4 +185,15 @@ class syntax_plugin_drawio_test extends DokuWikiTest
         $this->assertStringContainsString("alt='test:present.png'", $html);
         $this->assertStringNotContainsString("alt=''", $html);
     }
+
+    public function testEmptyMediaFileFallsBackToPlaceholder()
+    {
+        // issue #66: an empty diagram was saved, leaving a zero-byte file
+        $this->createMedia('test:blank.png', '');
+
+        $html = $this->render('{{drawio>test:blank}}');
+
+        $this->assertStringContainsString('blank-image.png', $html);
+        $this->assertStringContainsString('onclick', $html);
+    }
 }
