@@ -21,7 +21,8 @@ jobs:
         with:
           php-version: '8.3'
       - name: plugin.info.txt
-        run: bin/check-plugin-info.sh
+        # strict on master (that is where a release is cut), advisory on branches
+        run: bin/check-plugin-info.sh ${{ github.ref_name == 'master' && ' ' || '--warn' }}
       - name: php -l
         run: find . -name '*.php' -not -path './.cache/*' -print0 | xargs -0 -n1 php -l
 
