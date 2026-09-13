@@ -320,7 +320,7 @@ if (typeof window.toolbar !== 'undefined') {
             close: ""
     };
     
-    } else if (toolbarPossibleExtension.length = 1) {
+    } else if (toolbarPossibleExtension.length == 1) {
         // toobar definition in case of only one extension defined
         if (toolbarPossibleExtension[0] == ""){
             toolbar[toolbar.length] = {
