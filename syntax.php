@@ -68,9 +68,9 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
     }
 
     /**
-     * Render xhtml output or metadata
+     * Render xhtml, metadata or odt (issue #7) output
      *
-     * @param string        $mode     Renderer mode (supported modes: xhtml)
+     * @param string        $mode     Renderer mode (supported modes: xhtml, metadata, odt)
      * @param Doku_Renderer $renderer The renderer
      * @param array         $data     The data from the handler() function
      *
@@ -78,7 +78,7 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
      */
     public function render($mode, Doku_Renderer $renderer, $data)
     {
-        if ($mode !== 'xhtml' && $mode !== 'metadata') {
+        if ($mode !== 'xhtml' && $mode !== 'metadata' && $mode !== 'odt') {
             return false;
         }
 		$renderer->nocache();
@@ -149,10 +149,49 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         // top of that, not a substitute for it.
 		resolve_mediaid($current_ns, $media_id, $exists);
 
+        // issue #66: saving an empty diagram leaves a zero-byte media file behind,
+        // which is neither viewable nor (without this) clickable to fix again - treat
+        // it as missing everywhere (placeholder, odt export, ...) rather than just
+        // in the xhtml path below. This does NOT change metadata mode (issue #10):
+        // internalmedia() there goes through _recordMediaUsage(), which ignores the
+        // $exists we compute and re-derives existence itself via file_exists() - a
+        // zero-byte diagram is still correctly recorded as "used" either way.
+        if ($exists && @filesize(mediaFN($media_id)) === 0) {
+            $exists = false;
+        }
+
         // issue #10: the media manager reads media usage from page metadata, so
         // without this a diagram looks unused and is easy to delete by accident.
         if ($mode === 'metadata') {
             $renderer->internalmedia($media_id, $title);
+            return true;
+        }
+
+        // issue #7: ODT export is provided by the third-party "odt" plugin
+        // (https://www.dokuwiki.org/plugin:odt). It is never loaded unless a user
+        // installed it, so this code only runs for people who actually have it -
+        // everyone else keeps getting `return false` from the mode check above,
+        // exactly like today.
+        //
+        // Its renderer (renderer_plugin_odt_page, see ODT/ODTImage.php upstream)
+        // exposes _odtAddImage($path, $width, $height, $align, $title) - $path is
+        // a real filesystem path (mediaFN(), not a media id or URL), width/height
+        // are plain pixel numbers or null for "use the image's own size". This is
+        // the same call graphviz and ditaa (two other diagram plugins) use for
+        // their own odt support, so it's copying an established pattern rather
+        // than guessing at one.
+        //
+        // linkonly exists so a click opens the drawio editor instead of showing
+        // the picture inline - meaningless in a document with no editor to open,
+        // so a linkonly diagram is embedded here same as a normal one; a printed
+        // page with a dead link instead of the diagram would be strictly worse.
+        //
+        // A missing/empty diagram has nothing sensible to embed - skip it rather
+        // than exporting the on-wiki placeholder image into a document.
+        if ($mode === 'odt') {
+            if ($exists) {
+                $renderer->_odtAddImage(mediaFN($media_id), $width, $height, null, $title);
+            }
             return true;
         }
 
@@ -161,13 +200,6 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
             $renderer->doc .= "<a href='".DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($media_id)."' id='".hsc($media_id)."'
                         class='drawio-linkonly' onclick='edit(this);return false;'>".hsc($text)."</a>";
             return true;
-        }
-
-        // issue #66: saving an empty diagram leaves a zero-byte media file behind,
-        // which is neither viewable nor (without this) clickable to fix again - treat
-        // it as missing so the placeholder (and its edit link) show up instead.
-        if ($exists && @filesize(mediaFN($media_id)) === 0) {
-            $exists = false;
         }
 
         $style = "max-width:100%;cursor:pointer;";
