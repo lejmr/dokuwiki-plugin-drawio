@@ -145,6 +145,29 @@ class action_plugin_drawio_test extends DokuWikiTest
         $this->addToAssertionCount(1);
     }
 
+    /**
+     * cleanID('') is '', and mediaFN('') resolves to the media root directory
+     * rather than a file - every action below assumed $fl is a file. Confirmed
+     * without the guard this fix adds: rather than a clean no-op, the handler
+     * silently wrote a bogus '<mediaroot>.<uniqid>.tmp' file as a *sibling* of
+     * the media directory and fired MEDIA_UPLOAD_FINISH for it.
+     */
+    public function testSaveWithNoImageNameDoesNotCrash()
+    {
+        $request = new TestRequest();
+        $response = @$request->post(
+            [
+                'call' => 'plugin_drawio',
+                'action' => 'save',
+                'content' => 'data:image/png;base64,' . base64_encode('content'),
+            ],
+            '/lib/exe/ajax.php'
+        );
+
+        $this->assertCount(0, $this->firedEvents, 'nothing should be written/logged for a missing imageName');
+        $this->addToAssertionCount(1); // reaching here without a thrown Error/Exception is the point
+    }
+
     public function testSaveOfNewFileFiresMediaUploadFinish()
     {
         $mediaId = 'test:new.png';

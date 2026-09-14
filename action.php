@@ -67,6 +67,17 @@
             $name = $INPUT->str('imageName');
             $action = $INPUT->str('action');
 
+            // a missing/empty imageName cleans to '', and mediaFN('') resolves to
+            // the media root *directory* rather than a file - every action below
+            // assumes $fl is a file, escalating into anything from a stray warning
+            // to an uncaught fatal. A normal client never sends this.
+            if (trim($name) === '') {
+                if ($action == 'get_auth') {
+                    echo json_encode(false);
+                }
+                return;
+            }
+
             $suffix = strpos($action, "draft_") === 0 ? '.draft':'';
             $media_id = $name . $suffix;
 			$media_id = cleanID($media_id);
