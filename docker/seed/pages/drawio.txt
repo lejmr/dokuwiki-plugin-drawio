@@ -83,3 +83,25 @@ Only testable with the [[https://www.dokuwiki.org/plugin:gitbacked|gitbacked]]
 plugin installed: saving a diagram now fires ''MEDIA_UPLOAD_FINISH'', so the
 PNG is committed like any uploaded media. Automated tests assert the event and
 its payload; an actual gitbacked install was not part of the test.
+
+===== 11. ODT export (issue #7) =====
+
+The dev image bakes the third-party [[https://www.dokuwiki.org/plugin:odt|odt
+plugin]] into ''plugins.core'' (see ''docker/Dockerfile''), so it is already
+installed and enabled here - nothing to set up.
+
+  - Draw something in diagram 1 at the top of this page (or any diagram with a
+    real image behind it).
+  - Open [[?do=export_odt&id=drawio|this page's ODT export]] (or use the export
+    icon DokuWiki's page tools add once the odt plugin is active) and save the
+    file.
+  - An ''.odt'' is a zip. Unzip it and check two things:
+    - ''unzip -l export.odt'' lists a file under ''Pictures/'' - your diagram.
+    - ''unzip -p export.odt content.xml'' contains a ''<draw:image
+      xlink:href="Pictures/...">'' pointing at that same file.
+  - A diagram that does not exist yet (like ''test:second_diagram'' above, if
+    you have not opened it) must simply be absent from the export - no broken
+    image, no PHP warning in the container's ''docker compose logs''.
+  - ''?linkonly'' diagrams (section 6) are embedded as images here too: a
+    printed document has no editor to click, so showing nothing would be
+    worse than showing the picture.

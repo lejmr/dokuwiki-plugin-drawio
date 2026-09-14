@@ -58,6 +58,15 @@ This is how to start local development server:
 Wait until server is started, and feel free to login using *superuser:password* credentials and go on and develop. The development server is available at address http://localhost:8080
 
 
+## ODT export support
+
+Diagrams are embedded into a page's ODT export ("Export to ODT") the same way
+a plain `{{image.png}}` would be, provided the third-party
+[odt plugin](https://www.dokuwiki.org/plugin:odt) is installed - without it,
+DokuWiki never asks this plugin to render that format, so nothing changes for
+wikis that don't have it. A diagram that hasn't been drawn yet is simply left
+out of the export rather than embedding the on-wiki placeholder image.
+
 ## SVG support related notes
 
 In order to enable svg drawing support make sure:
