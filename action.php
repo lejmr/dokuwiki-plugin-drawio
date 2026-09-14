@@ -114,15 +114,20 @@
 				echo json_encode($overwrite_granted);
 				return;
             }
-						;
-			if (!$access_granted)
-				return [$lang['media_perm_upload'], 0];
+			if (!$access_granted) {
+				// EventHandler::process_event() discards every hook's return value,
+				// so nothing has ever read a returned [message, code] pair here -
+				// an HTTP status is what script.js's ajax .fail() can actually see.
+				http_status(403);
+				return;
+			}
 
 			io_makeFileDir($fl);
 		    if($action == 'save'){
 
 				if (!$overwrite_granted) {
-					return [$lang['media_perm_upload'], 0];
+					http_status(403);
+					return;
 				}
 
 				// This handler writes $fl directly, bypassing core's own upload

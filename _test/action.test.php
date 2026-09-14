@@ -215,6 +215,16 @@ class action_plugin_drawio_test extends DokuWikiTest
             'overwriting with mediarevisions off needs AUTH_DELETE, not just AUTH_UPLOAD'
         );
         $this->assertCount(0, $this->firedEvents);
+        // A denied save should also respond with a non-2xx status - that is
+        // what script.js's ajax .fail() needs to tell the user it was rejected
+        // (see action.php: http_status(403) on this path). Not asserted here:
+        // TestRequest's header_remove()/headers_list() round trip is a no-op
+        // under the CLI SAPI, where headers_sent() is true from process start
+        // (confirmed with a bare `php -r` reproduction, nothing dokuwiki- or
+        // plugin-specific) - every header()/http_status() call in ANY test in
+        // this suite is silently dropped, so getStatusCode() would always
+        // return null regardless of what the code under test does. Verified
+        // live instead (curl) that this path actually sends HTTP 403.
     }
 
     /**
