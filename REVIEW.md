@@ -30,6 +30,9 @@ PHP needed on the host.
 
 ## The pull requests
 
+**First wave — open, review and merge these into `master` in this order.**
+#68 first; the rest are stacked on it and GitHub retargets them automatically.
+
 | PR | Fixes | What |
 |---|---|---|
 | #68 | #67 | dev environment, test suite, CI |
@@ -37,16 +40,23 @@ PHP needed on the host.
 | #70 | #36 | media event so gitbacked sees diagrams |
 | #71 | #15 #31 #41 #23 | syntax: empty name, placeholders, linkonly, size/title |
 | #72 | #10 | media manager usage |
+
+**Second wave — already folded into `review/all`.** #73 (ODT export, #7), #74
+(the plugin was breaking other plugins' JavaScript, #16, plus hardening) and #75
+(CI runs the JS test) show as merged because their commits landed in
+`review/all`, the branch they targeted. Their diffs and descriptions are still
+worth reading; they are the record of what changed and why.
+
+| PR | Fixes | What |
+|---|---|---|
 | #73 | #7 | ODT export, and the deprecated `resolve_mediaid()` is gone |
-| #74 | #16 | the plugin was breaking other plugins' JavaScript; plus hardening |
+| #74 | #16 | plugin broke other plugins' JavaScript; save/permission hardening |
 | #75 | — | CI actually runs the JS test; two flaws in the date gate |
+| #76 | — | security audit: ACL, CSRF, stored content, packaging |
 
-Merge #68 first; #69–#72 are stacked on it and GitHub retargets them
-automatically. #73–#75 are based on `review/all`, so once the first wave is in
-master they need a rebase before merging — say the word and I will do it.
-
-`review/all` is for looking at the result as a whole. It is not meant to be
-merged; delete it, and this file, once the pull requests are in.
+Once the first wave is in `master`, say the word and I will rebase the second
+wave onto it as fresh pull requests, so you get the same per-topic review for
+those four. That is a mechanical step on my side.
 
 ## What #74 turned up
 
