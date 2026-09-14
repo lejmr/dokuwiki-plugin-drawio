@@ -175,8 +175,6 @@ function edit_cb(image)
                 {
                     imgData = msg.data ;
                     image.setAttribute('src', imgData);
-                    imgSrc=image.getAttribute('src');
-                    imgSrc=imgSrc.replace('plugins/drawio/blank-image.png','exe/fetch.php?media=');
                 }
                 else if (msg.format == 'svg') 
                 {
@@ -218,12 +216,6 @@ function edit_cb(image)
                         action: 'draft_rm'
                     }
                 );
-                
-                // Clean cache of this page
-                var url = new URL(window.location.href);
-                url.searchParams.set('purge', 'true');
-                jQuery.get(url);
-                
             }
             else if (msg.event == 'autosave')
             {
