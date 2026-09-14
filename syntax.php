@@ -142,12 +142,29 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
             $media_id .= ".png";
         }
 
-        // resolve_mediaid() cleans/sanitizes $media_id (cleanID) - this MUST run
-        // before the id is ever put into an HTML attribute, on every path,
-        // otherwise a crafted name (e.g. containing a quote) reaches the
-        // markup unsanitized. hsc()/mediaUrl() below are defense in depth on
+        // resolve_mediaid() was deprecated 2020-09-30 in favour of
+        // dokuwiki\File\MediaResolver (core prints a notice on every render
+        // otherwise - the same "long-deprecated symbol with no shim" shape as
+        // issue #64). Its own implementation (inc/pageutils.php) is:
+        //
+        //   $resolver = new MediaResolver("$ns:deprecated");
+        //   $media = $resolver->resolveId($media, $rev, $date_at);
+        //   $exists = media_exists($media, $rev, false, $date_at);
+        //
+        // reproduced here directly. The "$ns:deprecated" context id only matters
+        // for a leading "~" in $media_id (relative-to-current-page), which
+        // drawio's own @NS@/@PAGE@ placeholders already replace above; its
+        // namespace half (used for relative ids and "." prefixes) is $ns itself,
+        // exactly as passed in. $rev/$date_at are always defaults here, so they
+        // are dropped rather than threaded through for two arguments nothing
+        // ever sets.
+        //
+        // This MUST run before $media_id is ever put into an HTML attribute, on
+        // every path, otherwise a crafted name (e.g. containing a quote) reaches
+        // the markup unsanitized. hsc()/mediaUrl() below are defense in depth on
         // top of that, not a substitute for it.
-		resolve_mediaid($current_ns, $media_id, $exists);
+        $media_id = (new \dokuwiki\File\MediaResolver("$current_ns:deprecated"))->resolveId($media_id);
+        $exists = media_exists($media_id, '', false);
 
         // issue #66: saving an empty diagram leaves a zero-byte media file behind,
         // which is neither viewable nor (without this) clickable to fix again - treat
