@@ -98,7 +98,25 @@
 
 			io_makeFileDir($fl);
 		    if($action == 'save'){
-				
+
+				// The client sends a data: URL ("data:image/png;base64,...."). A
+				// failed drawio export, or jQuery serialising an undefined value
+				// as the literal string "undefined" (msg.data can be undefined -
+				// see script.js), produced neither a match at [1] (a PHP warning)
+				// nor valid base64 - and the file below got truncated to garbage
+				// or zero bytes before any of that was noticed. Validate first and
+				// write nothing at all on a bad payload.
+				$content = $INPUT->str('content');
+				if (!preg_match('/^data:[^;,]*;base64,(.+)$/s', $content, $matches)) {
+					http_status(400);
+					return;
+				}
+				$decoded = base64_decode($matches[1], true);
+				if ($decoded === false) {
+					http_status(400);
+					return;
+				}
+
 				$old = @filemtime($fl);
 				if(!file_exists(mediaFN($media_id, $old)) && file_exists($fl)) {
 					// add old revision to the attic if missing
@@ -110,13 +128,19 @@
 				// prepare directory
 				io_createNamespace($media_id, 'media');
 
-                // Write content to file
-                $content = $INPUT->str('content');
-                $base64data = explode(",", $content)[1];
-                //$whandle = fopen($file_path,'w');
-                $whandle = fopen($fl, 'w');
-                fwrite($whandle,base64_decode($base64data));
-                fclose($whandle);
+                // Write to a temp file and rename() over the target so a reader
+                // never sees (and a bad write never leaves behind) a half-written
+                // or truncated diagram - rename() is atomic on the same filesystem,
+                // fopen($fl,'w') is not. Matters most with mediarevisions off,
+                // where media_saveOldRevision() above never ran and there is no
+                // attic copy to recover from.
+                $tmp = $fl . '.' . uniqid('drawio', true) . '.tmp';
+                if (file_put_contents($tmp, $decoded) === false) {
+                    @unlink($tmp);
+                    http_status(500);
+                    return;
+                }
+                rename($tmp, $fl);
 
 				@clearstatcache(true, $fl);
 				$new = @filemtime($fl);

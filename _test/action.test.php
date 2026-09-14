@@ -62,6 +62,22 @@ class action_plugin_drawio_test extends DokuWikiTest
         );
     }
 
+    /**
+     * A failed drawio export, or jQuery serialising an undefined msg.data as the
+     * literal string "undefined" (script.js sends content: msg.data), used to
+     * truncate the live diagram to garbage/zero bytes before anything noticed -
+     * see action.php's 'save' handler.
+     */
+    public function testSaveWithGarbageContentLeavesTheDiagramAlone()
+    {
+        $file = mediaFN('test:keep.png');
+        io_makeFileDir($file); file_put_contents($file, 'good-content');
+        $r = new TestRequest();
+        @$r->post(['call'=>'plugin_drawio','action'=>'save',
+                   'imageName'=>'test:keep.png','content'=>'undefined'], '/lib/exe/ajax.php');
+        $this->assertSame('good-content', file_get_contents($file));
+    }
+
     public function testSaveOfNewFileFiresMediaUploadFinish()
     {
         $mediaId = 'test:new.png';
