@@ -197,7 +197,12 @@
                 fclose($whandle);
             }
             if($action == 'draft_rm'){
-                unlink($fl);
+                // script.js calls this unconditionally after both 'save' and 'exit',
+                // so a normal open/draw/save cycle where autosave never fired (no
+                // draft was ever written) logged unlink(): No such file or directory
+                if (file_exists($fl)) {
+                    unlink($fl);
+                }
             }
             if($action == 'draft_get'){
                 header('Content-Type: application/json');	

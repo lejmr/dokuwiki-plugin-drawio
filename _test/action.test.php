@@ -115,6 +115,36 @@ class action_plugin_drawio_test extends DokuWikiTest
         $this->addToAssertionCount(1);
     }
 
+    /**
+     * script.js calls draft_rm unconditionally after both 'save' and 'exit', so a
+     * normal open/draw/save cycle where autosave never fired (no draft was ever
+     * written to disk) hit unlink(): No such file or directory.
+     */
+    public function testDraftRmOfNonexistentDraftEmitsNoWarning()
+    {
+        $file = mediaFN('test:nodraft.png.draft');
+        $this->assertFileDoesNotExist($file);
+
+        set_error_handler(function ($errno, $errstr) {
+            if (stripos($errstr, 'No such file or directory') !== false) {
+                throw new \PHPUnit\Framework\Exception($errstr, $errno);
+            }
+            return false;
+        }, E_WARNING);
+
+        try {
+            $request = new TestRequest();
+            $request->post(
+                ['call' => 'plugin_drawio', 'action' => 'draft_rm', 'imageName' => 'test:nodraft.png'],
+                '/lib/exe/ajax.php'
+            );
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->addToAssertionCount(1);
+    }
+
     public function testSaveOfNewFileFiresMediaUploadFinish()
     {
         $mediaId = 'test:new.png';
