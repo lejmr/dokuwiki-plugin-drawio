@@ -123,3 +123,47 @@ assert.strictEqual(localStorage.getItem('diagramA.png'), null,
     'no dead localStorage entry should be written under the bare diagram id');
 
 console.log('OK: two diagrams get two independent draft keys (#26)');
+
+// --- regression test for #16: media manager has no JSINFO.plugin_drawio ---
+//
+// lib/exe/js.php concatenates every enabled plugin's script.js into one
+// response (js_pluginscripts()). Before the fix, script.js dereferenced
+// JSINFO['plugin_drawio'] at the top level, so on any page where that key is
+// missing - e.g. the fullscreen media manager, which never fires
+// DOKUWIKI_STARTED - loading it threw a TypeError and aborted the *whole*
+// concatenated response, silently breaking every plugin script that sorts
+// after "drawio" in the bundle (that is what issue #16, blamed for years on
+// the struct/CKGEdit plugins, actually was).
+//
+// This drives vm.runInContext() twice back to back, exactly like js.php
+// concatenates two scripts into one <script> tag: first script.js with a
+// media-manager-shaped JSINFO (no plugin_drawio key), then a second,
+// unrelated script. Both must run.
+{
+    const mmSandbox = {
+        // shape actually observed on lib/exe/mediamanager.php: no plugin_drawio
+        JSINFO: { id: null, namespace: '', ACT: 'show' },
+        window: {},
+        console,
+    };
+    mmSandbox.global = mmSandbox;
+    vm.createContext(mmSandbox);
+
+    const scriptJs = fs.readFileSync(path.join(__dirname, '..', 'script.js'), 'utf8');
+    let threw = null;
+    try {
+        vm.runInContext(scriptJs, mmSandbox);
+        // simulate the next plugin's script, concatenated right after ours
+        vm.runInContext('window.markerFromNextPlugin = true;', mmSandbox);
+    } catch (e) {
+        threw = e;
+    }
+
+    assert.strictEqual(threw, null,
+        'script.js must not throw when JSINFO.plugin_drawio is absent (issue #16): ' +
+        (threw && threw.stack));
+    assert.strictEqual(mmSandbox.window.markerFromNextPlugin, true,
+        'a plugin script concatenated after script.js must still run');
+}
+
+console.log('OK: script.js does not break other plugins when JSINFO.plugin_drawio is absent (#16)');

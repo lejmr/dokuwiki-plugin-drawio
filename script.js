@@ -1,6 +1,16 @@
 // Embeded editor
-var drawIoEditor= JSINFO['plugin_drawio']['url'] + '?embed=1&ui=atlas&spin=1&proto=json';
-var toolbarPossibleExtension=JSINFO['plugin_drawio']['toolbar_possible_extension'];
+//
+// JSINFO['plugin_drawio'] is populated by action.php's addjsinfo(), hooked to
+// DOKUWIKI_STARTED/MEDIAMANAGER_STARTED - not every page fires one of those
+// (fixes #16). DokuWiki concatenates every plugin's script.js into a single
+// response (js_pluginscripts() in lib/exe/js.php), so a top-level throw here
+// used to abort that whole bundle and silently break every plugin script
+// that happened to sort after "drawio" in it. Nothing below may run at
+// parse/load time without checking drawioConf() first.
+function drawioConf() {
+    return (typeof JSINFO !== 'undefined' && JSINFO['plugin_drawio']) ? JSINFO['plugin_drawio'] : null;
+}
+var toolbarPossibleExtension = drawioConf() ? drawioConf()['toolbar_possible_extension'] : [];
 var initial = null;
 var currentDiagramId = null;
 var imagePointer = null;
@@ -25,10 +35,12 @@ function edit(image)
 
 function edit_cb(image)
 {
-    var zIndex = 999;
-    if(JSINFO && JSINFO['plugin_drawio']){
-        zIndex = JSINFO['plugin_drawio']['zIndex'];
+    var conf = drawioConf();
+    if (!conf) {
+        console.log('drawio: plugin_drawio config missing from JSINFO, cannot open editor');
+        return;
     }
+    var zIndex = conf['zIndex'];
 
     imagePointer = image;
     currentDiagramId = imagePointer.getAttribute('id');
@@ -278,7 +290,7 @@ function edit_cb(image)
         }
     };
     window.addEventListener('message', receive);
-    iframe.setAttribute('src', drawIoEditor);
+    iframe.setAttribute('src', conf['url'] + '?embed=1&ui=atlas&spin=1&proto=json');
     document.body.appendChild(iframe);
 };
 
@@ -342,6 +354,6 @@ if (typeof window.toolbar !== 'undefined') {
                 close: ""
             };
         }
-        
+
     }
 };
