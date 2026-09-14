@@ -25,6 +25,11 @@ jobs:
         run: bin/check-plugin-info.sh ${{ github.ref_name == 'master' && ' ' || '--warn' }}
       - name: php -l
         run: find . -name '*.php' -not -path './.cache/*' -print0 | xargs -0 -n1 php -l
+      - name: javascript
+        # node ships on the runner; script.js is plain browser JS, no build step
+        run: |
+          node --check script.js
+          node _test/script.test.js
 
   tests:
     name: tests (DokuWiki ${{ matrix.dokuwiki }})
