@@ -90,17 +90,28 @@
 			
 			$user = $INPUT->server->str('REMOTE_USER');
 			$groups = (array) ($USERINFO['grps'] ?? []);
-			$auth_ow = (($conf['mediarevisions']) ? AUTH_UPLOAD : AUTH_DELETE);
 			$id = cleanID($name);
-			
-			// Check ACL
+
+			// Check ACL. Mirror core's inc/media.php media_save(): AUTH_UPLOAD is
+			// the baseline for everything (creating a new diagram, and even the
+			// read-only get_png/get_svg/draft_get), and the higher $auth_ow bar
+			// (needed because overwriting loses the old revision outright when
+			// mediarevisions is off) applies only to actually overwriting an
+			// existing file with 'save' - not to every action. Previously $auth_ow
+			// gated everything: verified live with `* @ALL 8` (AUTH_UPLOAD) and
+			// mediarevisions off, get_auth returned false and the diagram was not
+			// even clickable for anyone below admin, including to create new ones.
 			$auth = auth_aclcheck($id, $user, $groups);
-			$access_granted = ($auth >= $auth_ow);
-		
-			// AJAX request
+			$auth_ow = (($conf['mediarevisions']) ? AUTH_UPLOAD : AUTH_DELETE);
+			$access_granted = ($auth >= AUTH_UPLOAD);
+			$overwrite_granted = $access_granted && (!file_exists($fl) || $auth >= $auth_ow);
+
+			// AJAX request - answers whether 'save' would actually be allowed, so
+			// the media manager edit button (which relies on this) doesn't offer
+			// something that then silently fails.
 			if ($action == 'get_auth')
             {
-				echo json_encode($access_granted);
+				echo json_encode($overwrite_granted);
 				return;
             }
 						;
@@ -109,6 +120,10 @@
 
 			io_makeFileDir($fl);
 		    if($action == 'save'){
+
+				if (!$overwrite_granted) {
+					return [$lang['media_perm_upload'], 0];
+				}
 
 				// The client sends a data: URL ("data:image/png;base64,...."). A
 				// failed drawio export, or jQuery serialising an undefined value

@@ -168,6 +168,80 @@ class action_plugin_drawio_test extends DokuWikiTest
         $this->addToAssertionCount(1); // reaching here without a thrown Error/Exception is the point
     }
 
+    /**
+     * $auth_ow ("AUTH_UPLOAD if mediarevisions is on, else AUTH_DELETE") used to
+     * gate every action, including creating a brand new diagram and the
+     * read-only get_png/get_svg/draft_get - not just overwriting an existing
+     * file, unlike core's own media_save() (inc/media.php). Verified live with
+     * `* @ALL 8` (AUTH_UPLOAD) and mediarevisions off: get_auth returned false
+     * and the diagram was not even clickable for anyone below admin.
+     *
+     * ACL is off in this test environment, so auth_aclcheck() always returns
+     * exactly AUTH_UPLOAD (8) - never higher. That is deliberately below
+     * AUTH_DELETE (16), so it stands in for "an uploader, not an admin" and
+     * exercises the mediarevisions-off overwrite bar without needing a real
+     * ACL/auth plugin setup.
+     */
+    public function testCreatingNewDiagramWorksWithoutMediarevisions()
+    {
+        global $conf;
+        $conf['mediarevisions'] = 0;
+
+        $mediaId = 'test:brandnew.png';
+        $file = mediaFN($mediaId);
+        $this->assertFileDoesNotExist($file);
+
+        $this->saveViaAjax($mediaId, 'new-content');
+
+        $this->assertFileExists($file, 'AUTH_UPLOAD alone must be enough to create a new diagram');
+        $this->assertSame('new-content', file_get_contents($file));
+    }
+
+    public function testOverwritingRequiresMoreThanUploadWithoutMediarevisions()
+    {
+        global $conf;
+        $conf['mediarevisions'] = 0;
+
+        $mediaId = 'test:existing2.png';
+        $file = mediaFN($mediaId);
+        io_makeFileDir($file);
+        file_put_contents($file, 'original-content');
+
+        $this->saveViaAjax($mediaId, 'attempted-overwrite');
+
+        $this->assertSame(
+            'original-content',
+            file_get_contents($file),
+            'overwriting with mediarevisions off needs AUTH_DELETE, not just AUTH_UPLOAD'
+        );
+        $this->assertCount(0, $this->firedEvents);
+    }
+
+    /**
+     * Read-only actions must only need the AUTH_UPLOAD baseline, never the
+     * higher overwrite bar - a diagram that already exists must stay viewable
+     * (and editable-and-reopenable) even when mediarevisions is off.
+     */
+    public function testGetPngStillWorksWithoutMediarevisions()
+    {
+        global $conf;
+        $conf['mediarevisions'] = 0;
+
+        $mediaId = 'test:readable.png';
+        $file = mediaFN($mediaId);
+        io_makeFileDir($file);
+        file_put_contents($file, 'png-bytes');
+
+        $request = new TestRequest();
+        $response = @$request->post(
+            ['call' => 'plugin_drawio', 'action' => 'get_png', 'imageName' => $mediaId],
+            '/lib/exe/ajax.php'
+        );
+
+        $data = json_decode($response->getContent(), true);
+        $this->assertSame('data:image/png;base64,' . base64_encode('png-bytes'), $data['content']);
+    }
+
     public function testSaveOfNewFileFiresMediaUploadFinish()
     {
         $mediaId = 'test:new.png';
