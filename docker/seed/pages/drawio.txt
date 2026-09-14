@@ -108,3 +108,24 @@ why - DokuWiki concatenates every plugin's script into one file, and this
 plugin used to throw at load time whenever the media manager's page did not
 provide its config, silently breaking whatever plugin's script came after it
 alphabetically).
+===== 12. ODT export (issue #7) =====
+
+The dev image bakes the third-party [[https://www.dokuwiki.org/plugin:odt|odt
+plugin]] into ''plugins.core'' (see ''docker/Dockerfile''), so it is already
+installed and enabled here - nothing to set up.
+
+  - Draw something in diagram 1 at the top of this page (or any diagram with a
+    real image behind it).
+  - Open [[?do=export_odt&id=drawio|this page's ODT export]] (or use the export
+    icon DokuWiki's page tools add once the odt plugin is active) and save the
+    file.
+  - An ''.odt'' is a zip. Unzip it and check two things:
+    - ''unzip -l export.odt'' lists a file under ''Pictures/'' - your diagram.
+    - ''unzip -p export.odt content.xml'' contains a ''<draw:image
+      xlink:href="Pictures/...">'' pointing at that same file.
+  - A diagram that does not exist yet (like ''test:second_diagram'' above, if
+    you have not opened it) must simply be absent from the export - no broken
+    image, no PHP warning in the container's ''docker compose logs''.
+  - ''?linkonly'' diagrams (section 6) are embedded as images here too: a
+    printed document has no editor to click, so showing nothing would be
+    worse than showing the picture.
