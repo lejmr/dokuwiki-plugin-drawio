@@ -242,6 +242,25 @@ class action_plugin_drawio_test extends DokuWikiTest
         $this->assertSame('data:image/png;base64,' . base64_encode('png-bytes'), $data['content']);
     }
 
+    /**
+     * The 'save' handler writes $fl directly, bypassing core's own media
+     * extension whitelist entirely. Verified live before this fix:
+     * imageName=test:pwn.php with a base64 payload wrote a working file into
+     * data/media - the media manager itself refuses a .php upload, this
+     * handler did not.
+     */
+    public function testSaveRejectsNonDrawioExtensions()
+    {
+        $mediaId = 'test:pwn.php';
+        $file = mediaFN($mediaId);
+        $this->assertFileDoesNotExist($file);
+
+        $this->saveViaAjax($mediaId, '<?php echo "pwned"; ?>');
+
+        $this->assertFileDoesNotExist($file);
+        $this->assertCount(0, $this->firedEvents);
+    }
+
     public function testSaveOfNewFileFiresMediaUploadFinish()
     {
         $mediaId = 'test:new.png';

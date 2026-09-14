@@ -125,6 +125,21 @@
 					return [$lang['media_perm_upload'], 0];
 				}
 
+				// This handler writes $fl directly, bypassing core's own upload
+				// path (inc/media.php's media_save()) and the extension whitelist
+				// it enforces there - verified live: imageName=test:pwn.php with a
+				// base64 payload wrote a working PHP file straight into data/media.
+				// The plugin only ever produces png and svg, so reject anything
+				// else outright rather than trying to borrow core's
+				// media_contentcheck() (it inspects an already-written file for
+				// XSS markers and, for images, that decoded bytes actually match
+				// the claimed mimetype - moot here since we control the mimetype
+				// ourselves, and it does nothing at all for image/svg+xml).
+				if (!in_array(pathinfo($media_id, PATHINFO_EXTENSION), ['png', 'svg'], true)) {
+					http_status(400);
+					return;
+				}
+
 				// The client sends a data: URL ("data:image/png;base64,...."). A
 				// failed drawio export, or jQuery serialising an undefined value
 				// as the literal string "undefined" (msg.data can be undefined -
