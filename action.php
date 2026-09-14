@@ -78,7 +78,7 @@
 			global $INFO;
 			
 			$user = $INPUT->server->str('REMOTE_USER');
-			$groups = (array) $USERINFO['grps'];
+			$groups = (array) ($USERINFO['grps'] ?? []);
 			$auth_ow = (($conf['mediarevisions']) ? AUTH_UPLOAD : AUTH_DELETE);
 			$id = cleanID($name);
 			

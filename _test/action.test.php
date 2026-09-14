@@ -78,6 +78,43 @@ class action_plugin_drawio_test extends DokuWikiTest
         $this->assertSame('good-content', file_get_contents($file));
     }
 
+    /**
+     * $USERINFO is null (not an array) for a visitor who isn't logged in, and
+     * the image's onclick='edit(this)' is rendered regardless of ACL - so an
+     * anonymous reader clicking a diagram on a publicly readable wiki hit
+     * "Trying to access array offset on value of type null" in action.php
+     * before the ACL check even ran.
+     */
+    public function testGetAuthWithAnonymousUserEmitsNoWarning()
+    {
+        global $USERINFO;
+        $USERINFO = null;
+
+        // convertNoticesToExceptions is off for this suite (see _test/phpunit.xml
+        // upstream), so a warning would otherwise just print and the test would
+        // still pass - make the specific warning this bug caused fail instead.
+        // Local to this test only; other warnings pass through to PHP as usual.
+        set_error_handler(function ($errno, $errstr) {
+            if (stripos($errstr, 'array offset') !== false || stripos($errstr, 'null') !== false) {
+                throw new \PHPUnit\Framework\Exception($errstr, $errno);
+            }
+            return false;
+        }, E_WARNING);
+
+        try {
+            $request = new TestRequest();
+            $request->post(
+                ['call' => 'plugin_drawio', 'action' => 'get_auth', 'imageName' => 'test:anon.png'],
+                '/lib/exe/ajax.php'
+            );
+        } finally {
+            restore_error_handler();
+        }
+
+        // reaching here without the error handler throwing is the assertion
+        $this->addToAssertionCount(1);
+    }
+
     public function testSaveOfNewFileFiresMediaUploadFinish()
     {
         $mediaId = 'test:new.png';
