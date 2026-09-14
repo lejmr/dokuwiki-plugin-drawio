@@ -357,3 +357,54 @@ if (typeof window.toolbar !== 'undefined') {
 
     }
 };
+
+
+// Media manager: "Edit with draw.io" button (maintainer request, issue #16
+// context) - a diagram no page references cannot otherwise be edited at all.
+// Core builds the file detail panel's action buttons directly in
+// media_preview_buttons() (inc/media.php) with no event to extend them, and
+// that panel is loaded both by a direct page load (?do=media&image=...) and
+// by ajax (lib/scripts/media.js replaces div.file's content). So this reacts
+// to the DOM instead, re-running after every ajax call, and reuses edit() -
+// which already checks 'get_auth' server-side - rather than duplicating the
+// editor-opening logic or auth logic here.
+function drawioAddMediaManagerButton() {
+    var conf = drawioConf();
+    if (!conf) return;
+
+    jQuery('.drawio__mmbtn').remove();
+
+    // inc/template.php's tpl_mediaFileDetails() always prints the raw media id
+    // as this link's text (unlike the tabs, which aren't links at all for
+    // whichever tab is currently selected) - this is the one place it's
+    // reliably available regardless of file type or config.
+    var $header = jQuery('div.file .panelHeader a.mediafile').first();
+    if (!$header.length) return;
+    var mediaId = jQuery.trim($header.text());
+    if (!mediaId) return;
+
+    var ext = mediaId.split('.').pop();
+    if (conf['toolbar_possible_extension'].indexOf(ext) === -1) return;
+
+    var $img = jQuery('div.file div.image img').first();
+    if (!$img.length) return;
+    $img.attr('id', mediaId);
+
+    var $li = jQuery('<li class="drawio__mmbtn"></li>');
+    var $link = jQuery('<a href="#"></a>').text(conf['editbutton']);
+    $link.on('click', function (e) {
+        e.preventDefault();
+        edit($img[0]);
+    });
+    $li.append($link);
+    jQuery('div.file ul.actions').append($li);
+}
+
+// guarded: the test sandboxes in _test/script.test.js don't stub a real
+// jQuery, and script.js must still load harmlessly there (see #16 above)
+if (typeof jQuery === 'function') {
+    jQuery(function () {
+        drawioAddMediaManagerButton();
+        jQuery(document).ajaxComplete(drawioAddMediaManagerButton);
+    });
+}

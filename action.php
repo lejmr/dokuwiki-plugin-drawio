@@ -41,7 +41,12 @@
 	        $JSINFO['plugin_drawio'] = [
                 'zIndex' => $this->getConf('zIndex'),
                 'url' => $this->getConf('url'),
-                'toolbar_possible_extension' => array_map('trim', explode(",",$this->getConf('toolbar_possible_extension')))
+                'toolbar_possible_extension' => array_map('trim', explode(",",$this->getConf('toolbar_possible_extension'))),
+                // lang strings for the JS-only media manager button - plugins have no
+                // core mechanism to add entries to the global JS LANG object, so this
+                // (JSINFO) is the established way to hand a plugin's own translated
+                // strings to its script.js
+                'editbutton' => $this->getLang('editbutton')
             ];
 	    }
 

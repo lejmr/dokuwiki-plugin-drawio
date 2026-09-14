@@ -83,3 +83,28 @@ Only testable with the [[https://www.dokuwiki.org/plugin:gitbacked|gitbacked]]
 plugin installed: saving a diagram now fires ''MEDIA_UPLOAD_FINISH'', so the
 PNG is committed like any uploaded media. Automated tests assert the event and
 its payload; an actual gitbacked install was not part of the test.
+
+===== 11. Edit button in the media manager (issue #16) =====
+
+A diagram that no page (any longer) references used to be uneditable: nothing
+in the media manager could open it. There is now an **Edit with draw.io**
+button in the file detail panel.
+
+  - Open [[?do=media&ns=test|the media manager]] and select
+    ''test:fresh_diagram.png'' (draw diagram 1 in section 1 above first, if you
+    have not already, so the file exists).
+  - In the detail panel on the right, below the preview image, you should see
+    an **Edit with draw.io** button alongside the existing *Delete* / *Upload
+    new version* buttons.
+  - Click it: the draw.io editor opens on that diagram, exactly like clicking
+    the diagram on this page does. Save and close - the preview image in the
+    media manager updates.
+  - Click a non-diagram file (anything not ''.png''/''.svg''): the button must
+    not appear.
+
+This also indirectly checks issue #16 itself: opening the media manager no
+longer breaks other plugins' JavaScript (see the plugin's own script.js for
+why - DokuWiki concatenates every plugin's script into one file, and this
+plugin used to throw at load time whenever the media manager's page did not
+provide its config, silently breaking whatever plugin's script came after it
+alphabetically).
