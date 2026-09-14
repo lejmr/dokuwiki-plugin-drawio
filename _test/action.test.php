@@ -102,6 +102,28 @@ class action_plugin_drawio_test extends DokuWikiTest
         $this->assertTrue($data[4], 'overwriting an existing file must be reported as an overwrite');
     }
 
+    /**
+     * lib/exe/mediamanager.php never fires DOKUWIKI_STARTED (only doku.php does), so
+     * without also hooking MEDIAMANAGER_STARTED, JSINFO['plugin_drawio'] is missing
+     * on the media manager. script.js used to dereference it at the top level, and
+     * since DokuWiki concatenates every plugin's script.js into one response
+     * (js_pluginscripts() in lib/exe/js.php), that silently broke every plugin
+     * script sorting after "drawio" whenever the media manager was open.
+     * See https://github.com/lejmr/dokuwiki-plugin-drawio/issues/16
+     */
+    public function testMediaManagerStartedPopulatesJsinfo()
+    {
+        global $JSINFO;
+        $JSINFO = [];
+
+        $data = [];
+        \dokuwiki\Extension\Event::createAndTrigger('MEDIAMANAGER_STARTED', $data);
+
+        $this->assertArrayHasKey('plugin_drawio', $JSINFO);
+        $this->assertArrayHasKey('url', $JSINFO['plugin_drawio']);
+        $this->assertArrayHasKey('toolbar_possible_extension', $JSINFO['plugin_drawio']);
+    }
+
     public function testDraftSaveDoesNotFireMediaUploadFinish()
     {
         // drafts are internal scratch files, not media the user owns - see action.php

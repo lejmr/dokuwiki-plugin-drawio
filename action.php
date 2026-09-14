@@ -13,6 +13,10 @@
 
         public function register(Doku_Event_Handler $controller) {
             $controller->register_hook('DOKUWIKI_STARTED', 'AFTER', $this, 'addjsinfo');
+            // lib/exe/mediamanager.php never fires DOKUWIKI_STARTED, so without this
+            // JSINFO['plugin_drawio'] is missing there - see script.js for why that
+            // used to break every plugin loaded after drawio (fixes #16).
+            $controller->register_hook('MEDIAMANAGER_STARTED', 'AFTER', $this, 'addjsinfo');
             $controller->register_hook('AJAX_CALL_UNKNOWN', 'BEFORE', $this,'_ajax_call');
             // $controller->register_hook('TOOLBAR_DEFINE', 'AFTER', $this, 'insert_button', array ());
         }
