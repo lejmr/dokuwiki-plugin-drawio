@@ -34,6 +34,10 @@ function makeImage(id) {
 function buildSandbox() {
     const localStorage = makeLocalStorage();
     const messageListeners = [];
+    // one entry per document.createElement() call, in order - script.js checks
+    // evt.source against the current iframe's contentWindow (object identity,
+    // not a string), so tests need the real object, not a URL to compare.
+    const iframes = [];
 
     const sandbox = {
         JSINFO: {
@@ -54,10 +58,11 @@ function buildSandbox() {
             get: () => {},
         },
         document: {
-            createElement: () => ({
-                setAttribute() {},
-                contentWindow: { postMessage() {} },
-            }),
+            createElement: () => {
+                const iframe = { setAttribute() {}, contentWindow: { postMessage() {} } };
+                iframes.push(iframe);
+                return iframe;
+            },
             body: { appendChild() {}, removeChild() {} },
             getElementById: () => null,
         },
@@ -75,7 +80,7 @@ function buildSandbox() {
     };
     sandbox.global = sandbox;
     vm.createContext(sandbox);
-    return { sandbox, localStorage, messageListeners };
+    return { sandbox, localStorage, messageListeners, iframes };
 }
 
 function loadScript(sandbox) {
@@ -83,24 +88,31 @@ function loadScript(sandbox) {
     vm.runInContext(code, sandbox);
 }
 
-function autosave(sandbox, messageListeners, xml) {
+function autosave(sandbox, messageListeners, xml, iframes) {
     const receive = messageListeners[messageListeners.length - 1];
     assert(typeof receive === 'function', 'no message listener registered by edit_cb');
-    receive({ data: JSON.stringify({ event: 'autosave', xml }) });
+    const source = iframes[iframes.length - 1].contentWindow;
+    receive({ source, data: JSON.stringify({ event: 'autosave', xml }) });
 }
 
 // --- the actual test ---------------------------------------------------
-const { sandbox, localStorage, messageListeners } = buildSandbox();
+const { sandbox, localStorage, messageListeners, iframes } = buildSandbox();
 loadScript(sandbox);
 
 // Editing diagramA and autosaving stores a draft under its own key.
 sandbox.edit_cb(makeImage('diagramA.png'));
-autosave(sandbox, messageListeners, '<mxGraphModel>A</mxGraphModel>');
+autosave(sandbox, messageListeners, '<mxGraphModel>A</mxGraphModel>', iframes);
+
+// edit_cb() now refuses to open a second editor while one is open (#4/#5
+// fix, tested on its own below) - reset the flag the way any of the real
+// close paths (save/exit) do, without going through their side effects
+// (which include clearing the draft this test is about to check for).
+sandbox.editorOpen = false;
 
 // Editing a different diagram, diagramB, and autosaving must not touch
 // diagramA's draft, and must land under its own distinct key.
 sandbox.edit_cb(makeImage('diagramB.png'));
-autosave(sandbox, messageListeners, '<mxGraphModel>B</mxGraphModel>');
+autosave(sandbox, messageListeners, '<mxGraphModel>B</mxGraphModel>', iframes);
 
 const keyA = '.draft-diagramA.png';
 const keyB = '.draft-diagramB.png';
@@ -167,3 +179,95 @@ console.log('OK: two diagrams get two independent draft keys (#26)');
 }
 
 console.log('OK: script.js does not break other plugins when JSINFO.plugin_drawio is absent (#16)');
+
+// --- regression test: double-click must not stack a second editor ---------
+//
+// edit_cb() used to append a new window 'message' listener every call with no
+// check for one already being attached. Two clicks on a diagram meant two
+// iframes and two listeners, so every subsequent autosave fired duplicate
+// draft_save ajax posts for the rest of the session.
+{
+    const { sandbox, messageListeners } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('double.png'));
+    assert.strictEqual(messageListeners.length, 1, 'first click must register a listener');
+
+    sandbox.edit_cb(makeImage('double.png'));
+    assert.strictEqual(messageListeners.length, 1,
+        'a second click while the editor is still open must not add a second listener');
+}
+
+console.log('OK: a second click while the editor is open does not stack a second listener (#4)');
+
+// --- regression test: postMessage must be checked against the real iframe ---
+//
+// The listener is on window, not the iframe, so without a source check
+// receive() would parse and act on a message posted by anything on the page,
+// not just the real draw.io iframe. Checked via evt.source object identity,
+// not evt.origin (a string check breaks the moment a redirect/reverse
+// proxy/SSO gateway sits in front of a self-hosted draw.io - see script.js).
+{
+    const { sandbox, localStorage, messageListeners, iframes } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('spoofed.png'));
+    const receive = messageListeners[messageListeners.length - 1];
+    assert.strictEqual(iframes.length, 1);
+
+    // a synthesised autosave posted with some other window as evt.source
+    // (e.g. an unrelated script/frame on the page) must be ignored
+    const fakeSource = { postMessage() {} };
+    assert.notStrictEqual(fakeSource, iframes[0].contentWindow, 'sanity: must be a different object');
+    receive({
+        source: fakeSource,
+        data: JSON.stringify({ event: 'autosave', xml: '<mxGraphModel>spoofed</mxGraphModel>' }),
+    });
+
+    assert.strictEqual(localStorage.getItem('.draft-spoofed.png'), null,
+        'a message whose source is not the real draw.io iframe must be ignored');
+}
+
+console.log('OK: postMessage not sourced from the real draw.io iframe is ignored (#5)');
+
+// --- regression test: a non-JSON postMessage must not wedge the editor ---
+//
+// JSON.parse(evt.data) was unguarded. A throw there aborted the listener
+// before close() could run, leaving editorOpen stuck true and every diagram
+// on the page uneditable until a reload - worse than the double-click bug
+// above. Reachable whenever the embed posts a non-JSON string (a partial
+// message during load, a heartbeat, a protocol hiccup).
+{
+    const { sandbox, messageListeners, iframes } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('malformed.png'));
+    const receive = messageListeners[messageListeners.length - 1];
+    const source = iframes[iframes.length - 1].contentWindow;
+
+    // script.js is right to console.log this in a real browser - swap in a
+    // capturing stub for this one call so a passing test run stays quiet,
+    // without touching the real (shared) console object, then assert on what
+    // got logged rather than just swallowing it.
+    const logged = [];
+    const realConsole = sandbox.console;
+    sandbox.console = { ...realConsole, log: (...args) => logged.push(args) };
+    try {
+        assert.doesNotThrow(() => receive({ source, data: 'not json at all' }),
+            'a non-JSON postMessage must not throw out of the listener');
+    } finally {
+        sandbox.console = realConsole;
+    }
+    assert.ok(logged.some((args) => String(args[0]).includes('non-JSON')),
+        'the malformed message should still be logged for debugging, just not to this test\'s stdout');
+
+    assert.strictEqual(sandbox.editorOpen, true,
+        'editorOpen must survive a malformed message - the editor is still open, just got noise');
+
+    // and the editor must still be usable afterwards
+    autosave(sandbox, messageListeners, '<mxGraphModel>ok</mxGraphModel>', iframes);
+    assert.ok(sandbox.localStorage.getItem('.draft-malformed.png'),
+        'a later, well-formed message must still work after a malformed one');
+}
+
+console.log('OK: a non-JSON postMessage does not wedge the editor open (#5 JSON.parse guard)');

@@ -14,6 +14,13 @@ var toolbarPossibleExtension = drawioConf() ? drawioConf()['toolbar_possible_ext
 var initial = null;
 var currentDiagramId = null;
 var imagePointer = null;
+// guards against a second click stacking a second iframe + 'message' listener
+// on top of an already-open editor (every autosave would then fire duplicate
+// draft_save requests for the rest of the session).
+// known gap: if the iframe never loads at all (ad blocker, a corporate proxy
+// blocking diagrams.net) this stays stuck true with no cancel affordance -
+// not fixed here, needs a real UI (e.g. a close button/timeout on the iframe).
+var editorOpen = false;
 
 function edit(image)
 {   
@@ -40,6 +47,10 @@ function edit_cb(image)
         console.log('drawio: plugin_drawio config missing from JSINFO, cannot open editor');
         return;
     }
+    if (editorOpen) {
+        // ignore the click rather than layering a second editor on top
+        return;
+    }
     var zIndex = conf['zIndex'];
 
     imagePointer = image;
@@ -59,10 +70,12 @@ function edit_cb(image)
     iframe.setAttribute('frameborder', '0');
     iframe.setAttribute('class', 'drawio');
     iframe.setAttribute('style', 'z-index: ' + zIndex + ';');
+    editorOpen = true;
 
     var close = function()
     {
         window.removeEventListener('message', receive);
+        editorOpen = false;
         document.body.removeChild(iframe);
     };
     
@@ -117,9 +130,27 @@ function edit_cb(image)
     
     var receive = function(evt)
     {
+        // the listener is on window, not the iframe, so without this any script
+        // on the page (not just the draw.io iframe) could post a synthesised
+        // {"event":"save",...} and have it acted on. A string origin check
+        // breaks the moment a redirect/reverse proxy/SSO gateway sits in front
+        // of a self-hosted draw.io (the 'url' setting supports that) - compare
+        // identity instead, same as drawio's own reference integration
+        // (jgraph/drawio-integration, examples/embed-mode/diagram-editor.js).
+        if (evt.source !== iframe.contentWindow) return;
         if (evt.data.length > 0)
         {
-            var msg = JSON.parse(evt.data);
+            var msg;
+            try {
+                msg = JSON.parse(evt.data);
+            } catch (e) {
+                // a partial message during load, a heartbeat, a protocol hiccup -
+                // an unguarded throw here would abort before close() ever runs,
+                // leaving editorOpen stuck true and the diagram uneditable until
+                // a reload (same fix the reference integration applies)
+                console.log('drawio: ignoring non-JSON postMessage', e);
+                return;
+            }
 			// wait for init msg
             if (msg.event == 'init')
             {
