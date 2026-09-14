@@ -38,6 +38,13 @@ function buildSandbox() {
     // evt.source against the current iframe's contentWindow (object identity,
     // not a string), so tests need the real object, not a URL to compare.
     const iframes = [];
+    // one entry per jQuery.post() call, in call order, so a test can find e.g.
+    // the 'save' post and fire its .fail() callback to simulate the server
+    // rejecting it (bad extension/payload/permission all surface the same way:
+    // a non-2xx response, i.e. jQuery's fail()).
+    const postCalls = [];
+    const alerts = [];
+    let reloaded = false;
 
     const sandbox = {
         JSINFO: {
@@ -51,10 +58,21 @@ function buildSandbox() {
         DOKU_BASE: '/',
         localStorage,
         console,
+        alert: (msg) => alerts.push(msg),
         jQuery: {
-            // Stub network calls: the test never needs their callbacks to
-            // fire (drafts are driven straight through localStorage).
-            post: () => {},
+            // Stub network calls: most tests never need their callbacks to fire
+            // (drafts are driven straight through localStorage) - but .done()/
+            // .fail() must be chainable, since script.js's 'save' post relies on
+            // both (the draft is only cleared once the save succeeds).
+            post: (url, data) => {
+                const call = { url, data, failCb: null, doneCb: null };
+                postCalls.push(call);
+                const chain = {
+                    fail: (cb) => { call.failCb = cb; return chain; },
+                    done: (cb) => { call.doneCb = cb; return chain; },
+                };
+                return chain;
+            },
             get: () => {},
         },
         document: {
@@ -69,7 +87,7 @@ function buildSandbox() {
         window: {
             addEventListener: (evt, fn) => { if (evt === 'message') messageListeners.push(fn); },
             removeEventListener: () => {},
-            location: { href: 'http://localhost/doku.php?id=test' },
+            location: { href: 'http://localhost/doku.php?id=test', reload: () => { reloaded = true; } },
         },
         URL,
         atob: (s) => Buffer.from(s, 'base64').toString('binary'),
@@ -80,7 +98,10 @@ function buildSandbox() {
     };
     sandbox.global = sandbox;
     vm.createContext(sandbox);
-    return { sandbox, localStorage, messageListeners, iframes };
+    return {
+        sandbox, localStorage, messageListeners, iframes, postCalls, alerts,
+        wasReloaded: () => reloaded,
+    };
 }
 
 function loadScript(sandbox) {
@@ -271,3 +292,50 @@ console.log('OK: postMessage not sourced from the real draw.io iframe is ignored
 }
 
 console.log('OK: a non-JSON postMessage does not wedge the editor open (#5 JSON.parse guard)');
+
+// --- regression test: a rejected save must not lose the diagram ----------
+//
+// The 'export' handler updates the visible image and closes the editor
+// immediately, then fires the 'save' ajax post. If the server rejects it (bad
+// extension/payload/permission - all of which action.php now can) the user
+// otherwise has no way to know the file on disk is unchanged - unless the
+// draft (localStorage + on-disk) is still there to fall back on. That draft
+// used to be wiped unconditionally *before* the save post even went out, so
+// a rejected save meant the change existed nowhere at all: not on disk (the
+// server rejected it), not in the draft either.
+{
+    const { sandbox, messageListeners, iframes, postCalls, alerts, wasReloaded } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('rejected.png'));
+    autosave(sandbox, messageListeners, '<mxGraphModel>keep me</mxGraphModel>', iframes);
+    const draftKey = '.draft-rejected.png';
+    assert.ok(sandbox.localStorage.getItem(draftKey), 'sanity: draft must exist before the export');
+
+    const receive = messageListeners[messageListeners.length - 1];
+    const source = iframes[iframes.length - 1].contentWindow;
+
+    receive({
+        source,
+        data: JSON.stringify({ event: 'export', format: 'xmlpng', data: 'data:image/png;base64,Zm9v' }),
+    });
+
+    const saveCall = postCalls.find((c) => c.data && c.data.action === 'save');
+    assert.ok(saveCall, "the 'export' handler must post action:'save'");
+    assert.ok(typeof saveCall.failCb === 'function',
+        "the 'save' post must register a .fail() handler so a server rejection is not silent");
+
+    // simulate the server rejecting it (bad extension/payload/permission -
+    // action.php now returns a non-2xx status for all three)
+    saveCall.failCb();
+
+    assert.strictEqual(alerts.length, 1, 'a rejected save must alert the user, not pretend to have worked');
+    assert.ok(wasReloaded(), 'the page must reload so the lying "saved" image does not stick around');
+
+    assert.ok(sandbox.localStorage.getItem(draftKey),
+        'a rejected save must NOT clear the draft - it is the only copy of the change left');
+    assert.ok(!postCalls.some((c) => c.data && c.data.action === 'draft_rm'),
+        'a rejected save must NOT clean up the on-disk draft either');
+}
+
+console.log('OK: a rejected save keeps the draft instead of losing the diagram');

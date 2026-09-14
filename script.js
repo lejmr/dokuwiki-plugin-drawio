@@ -223,30 +223,53 @@ function edit_cb(image)
                     trElement.style.textAlign = "center" ;
                 }
                 
-                localStorage.removeItem('.draft-' + currentDiagramId);
-                draft = null;
 				close();
 
-                // Save into dokuwiki
+                // Save into dokuwiki. The image above was already updated to look
+                // saved and the editor already closed - the draft (localStorage +
+                // on-disk) is the only thing that still says otherwise, so it must
+                // only be cleared once the save is confirmed to have worked. If it
+                // were cleared up front and the server then rejected the save (bad
+                // extension, bad payload, no permission), the user's change would
+                // exist nowhere at all - not on disk, not in the draft - and that
+                // is exactly the case the draft exists to cover.
                 jQuery.post(
                     DOKU_BASE + 'lib/exe/ajax.php',
                     {
-                        call: 'plugin_drawio', 
+                        call: 'plugin_drawio',
                         imageName: imagePointer.getAttribute('id'),
                         content: msg.data,
                         action: 'save'
                     }
-                );
+                ).done(function() {
+                    localStorage.removeItem('.draft-' + currentDiagramId);
+                    draft = null;
 
-                // Remove all draft files
-                jQuery.post(
-                    DOKU_BASE + 'lib/exe/ajax.php',
-                    {
-                        call: 'plugin_drawio', 
-                        imageName: imagePointer.getAttribute('id'),
-                        action: 'draft_rm'
-                    }
-                );
+                    // Remove all draft files - best-effort scratch-file cleanup,
+                    // not worth alerting over; a failure here just means a stale
+                    // draft lingers (offering to restore it next time this
+                    // diagram opens).
+                    jQuery.post(
+                        DOKU_BASE + 'lib/exe/ajax.php',
+                        {
+                            call: 'plugin_drawio',
+                            imageName: imagePointer.getAttribute('id'),
+                            action: 'draft_rm'
+                        }
+                    ).fail(function() {
+                        console.log('drawio: draft_rm failed, a stale draft may linger');
+                    });
+                }).fail(function() {
+                    // Draft is untouched on purpose (see above) - draft_get will
+                    // offer it back next time this diagram is opened. Reload is
+                    // still fine here: alert() is modal (the user has dismissed it
+                    // before reload runs), and nothing else touches the draft on
+                    // this path - only the .done() branch above does, and that
+                    // never runs when we're here.
+                    alert('Saving the diagram failed - your change was NOT saved, but ' +
+                        'was kept as a draft. Reopen this diagram to get it back.');
+                    window.location.reload();
+                });
             }
             else if (msg.event == 'autosave')
             {
