@@ -1,6 +1,6 @@
 ---
 name: validated-change
-description: How a change to this plugin gets built, proven and shipped without breaking anything and without the maintainer validating by hand - use for every fix, feature, fork integration or release, whichever model runs it
+description: The whole path from a feature request or issue to a merged, released change - roles, evidence rules, fresh-container validation, maintainer batches, snapshot-tree PRs, changelog and the release button - use for every fix, feature, fork integration or release, whichever model runs it
 ---
 
 # Validated change
@@ -86,6 +86,78 @@ executing instructions and reporting literal output.
   real export, not a theory. The theory was wrong.
 - "Chained reviewers agreed." - reviewers reading prose converge on the
   prose. Ask for the command output.
+
+## The flow: from a request to a release
+
+This is the whole path, in order. Nothing is skipped because "it's small".
+
+1. **Intake.** The maintainer arrives with a request (an issue, a fork, a
+   sentence). Before any code: read the issue thread and the forks
+   (`gh api repos/<owner>/<repo>/forks?sort=newest`, and the closed/stale
+   issues - the stale bot used to close good reports), and write back in
+   one message: what will be built, what will NOT (with a reason), and the
+   decisions only the maintainer can make (each with a recommendation).
+   The maintainer answers once; those answers are recorded in the brief.
+   A feature is frozen while a validation batch is open (rule 8).
+2. **Brief + validation plan** (planner). One brief per implementer; a
+   validation-plan delta for the executor (new M-steps with command,
+   expected literal evidence, stop-or-not). Independent topics get
+   independent implementers in their own worktrees, in parallel.
+3. **Implement** (implementer): code, golden + extra tests, mutation
+   check, three DokuWiki branches, both JS tiers, browser rule if it
+   applies, commits on the branch. Report with literal output.
+4. **Sceptic**: reads the diff and the evidence, tries to break it, adds
+   the missing test. What the sceptic found is fixed and committed before
+   going on - the planner does not carry unresolved sceptic findings.
+5. **Integrate**: merge the topic branches into one integration branch
+   (`feature/<batch>`); resolve only test-file conflicts (both sides are
+   usually independent blocks - keep both); run everything again.
+6. **Validate from nothing** (executor): the demo wiki is rebuilt from
+   scratch on the integration commit (`docker compose down -v && up
+   --build -d`) and the validation plan runs M0-M6. Anything red goes back
+   to step 3. Only when it is green does the maintainer hear about it.
+7. **Batch for the maintainer**: a page in the demo wiki (`batch<N>`) with
+   at most five editor-only steps and a "Good =" per step, plus the two
+   lines of what the machine proved. The maintainer answers `n good / m
+   ko: ...`. A ko is a bug: back to step 3, then 6, then a new batch.
+8. **Land it**: topical PRs from snapshot trees with `bin/merge-stages.sh`
+   (one commit per topic whose *tree* is the integration history at that
+   boundary; squash-only; the script verifies master's tree after every
+   merge and stops on mismatch). Titles carry `fixes #N, fixes #M` - one
+   keyword per number, GitHub ignores the rest. Bodies describe by class,
+   no exploit recipes. Only with the maintainer's explicit go.
+9. **Changelog**: `CHANGELOG.md` gets a `## [YYYY-MM-DD]` section for the
+   release day, written for people running the plugin. The release
+   workflow refuses a version without one - that is the reminder, not a
+   bug.
+10. **Release**: *Actions -> Release -> Run workflow*. It bumps the date,
+    tags, tests, builds the zip from `git archive`, publishes. The job
+    summary carries the dokuwiki.org block (never the release notes). The
+    maintainer pastes it onto the plugin page - the only manual step, and
+    the one that actually reaches DokuWiki's updater.
+11. **Close the loop**: `fixes` closed the issues; anything else gets one
+    factual sentence (what fixed it, where it ships). Reopen stale-closed
+    reports that are still valid rather than filing duplicates.
+
+## Working with the maintainer (learned in two days, both directions)
+
+- He decides, once, up front. Give him the decision list with a
+  recommendation each; do not re-ask, do not drip questions. Record the
+  answers in the brief and in `DEVELOPMENT.md`/`SECURITY.md` where they
+  are policy.
+- He tests only what needs a real editor, in batches of five, and answers
+  good/ko. A list that reaches him before the machine has proven the rest
+  from a fresh container is the single thing that destroyed trust here.
+- Outward actions - push, PR, merge, closing/commenting issues, releasing,
+  installing anything into his wiki - only with an explicit go for that
+  action in that context. Squash-only merges. No local release scripts.
+- Security findings go to `SECURITY.md` and one branch/PR, never public
+  issues; PR text describes by class.
+- Release notes are for users: no dokuwiki.org block, no process noise.
+- When asked "did you test this?", the only good answer is the command and
+  its output. When something was missed, quantify it (what one command
+  would have caught it vs. what was spent) and turn it into a rule here.
+- He reads Czech; the repository, commits, PRs and docs are English.
 
 ## Templates
 
