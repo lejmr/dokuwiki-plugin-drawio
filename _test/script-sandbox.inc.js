@@ -309,6 +309,7 @@ const REALISTIC_CONF = {
     locktime: 900,
     sectok: '',
     zIndex: 999,
+    topOffset: 0,
 };
 
 // Enough of jQuery for script.js's module-level jQuery(function(){...})

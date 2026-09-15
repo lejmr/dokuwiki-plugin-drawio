@@ -58,6 +58,18 @@ class syntax_plugin_drawio_validation_render_test extends DokuWikiTest
         return $file;
     }
 
+    /** See _test/golden/render.test.php's own copy for why this bypasses media_saveOldRevision(). */
+    protected function archiveOldMediaRevision($mediaId, $bytes, $atTime)
+    {
+        global $INPUT;
+        $INPUT = new \dokuwiki\Input\Input();
+
+        $atticFile = mediaFN($mediaId, $atTime);
+        io_makeFileDir($atticFile);
+        file_put_contents($atticFile, $bytes);
+        addMediaLogEntry($atTime, $mediaId, DOKU_CHANGE_TYPE_CREATE, '', '', null, strlen($bytes));
+    }
+
     /**
      * The media manager lists where a file is used by reading the page's
      * metadata. Without this the diagram looks unused (#10).
@@ -174,7 +186,9 @@ class syntax_plugin_drawio_validation_render_test extends DokuWikiTest
         $html = $this->render('{{drawio>test:present?200}}');
 
         $this->assertStringContainsString('width:200px', $html);
-        $this->assertStringNotContainsString('height:', $html);
+        // min-height:24px (issue #62) is always present now - only the
+        // explicit height:NNpx param is what width-only sizing must omit.
+        $this->assertStringNotContainsString('height:200px', $html);
         $this->assertStringContainsString('w=200', $html);
         $this->assertStringNotContainsString('h=', $html);
         $this->assertStringContainsString(
@@ -304,5 +318,114 @@ class syntax_plugin_drawio_validation_render_test extends DokuWikiTest
         $this->assertStringNotContainsString('tEXt', $bytes);
         $this->assertStringNotContainsString('zTXt', $bytes);
         $this->assertStringNotContainsString('iTXt', $bytes);
+    }
+
+    protected function renderAtDate($text, $dateAt, $id = 'start')
+    {
+        global $ID, $INPUT;
+        $ID = $id;
+        $_REQUEST['id'] = $id;
+        $INPUT = new \dokuwiki\Input\Input();
+
+        return p_render('xhtml', p_get_instructions($text), $info, $dateAt);
+    }
+
+    /**
+     * issue #62: edit_button off (the default) renders no button at all -
+     * every wiki that hasn't opted in keeps exactly the markup it had
+     * before this feature existed.
+     */
+    public function testEditButtonRendersNothingWhenDisabled()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present}}');
+
+        $this->assertStringNotContainsString('<button', $html);
+        $this->assertStringNotContainsString('drawioEditButtonClick', $html);
+    }
+
+    /** A linkonly diagram has no image to put a button under. */
+    public function testEditButtonIsNotAddedToALinkonlyDiagram()
+    {
+        $this->setConf('edit_button', 1);
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present?linkonly}}');
+
+        $this->assertStringNotContainsString('<button', $html);
+    }
+
+    /** The min clickable size applies to a sized diagram too, not just the default size. */
+    public function testMinimumClickableSizeSurvivesExplicitSizing()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present?5x5}}');
+
+        $this->assertStringContainsString('min-width:24px', $html);
+        $this->assertStringContainsString('min-height:24px', $html);
+        $this->assertStringContainsString('width:5px', $html);
+        $this->assertStringContainsString('height:5px', $html);
+    }
+
+    /**
+     * $DATE_AT: viewing at (or after) the diagram's current mtime must not
+     * add a rev= at all - MediaChangeLog::getLastRevisionAt() returns ''
+     * for "the current version", and the URL must stay exactly what it was
+     * before this feature existed for that (by far the common) case.
+     */
+    public function testViewingAtOrAfterTheCurrentRevisionAddsNoRevParam()
+    {
+        $file = $this->createMedia('test:current.png', 'only-version');
+
+        $html = $this->renderAtDate('{{drawio>test:current}}', time() + 3600);
+
+        $this->assertStringContainsString(
+            "src='".DOKU_BASE."lib/exe/fetch.php?media=test:current.png'",
+            $html
+        );
+        $this->assertStringNotContainsString('rev=', $html);
+    }
+
+    /**
+     * $DATE_AT viewed before any revision exists at all: getLastRevisionAt()
+     * returns false (no matching revision), which must not be mistaken for
+     * a revision timestamp of 0 or an empty-but-truthy rev param.
+     */
+    public function testViewingBeforeAnyRevisionExistedAddsNoRevParam()
+    {
+        $this->createMedia('test:onlynow.png');
+
+        $html = $this->renderAtDate('{{drawio>test:onlynow}}', time() - 3600);
+
+        $this->assertStringNotContainsString('rev=', $html);
+    }
+
+    /** $DATE_AT applies to a linkonly diagram's link, not just the <img>. */
+    public function testDateAtAppliesToALinkonlyDiagramToo()
+    {
+        $mediaId = 'test:revvedlink.png';
+        $oldMtime = time() - 120;
+        $this->archiveOldMediaRevision($mediaId, 'first-version', $oldMtime);
+        $this->createMedia($mediaId, 'second-version');
+
+        $html = $this->renderAtDate('{{drawio>test:revvedlink?linkonly}}', time() - 60);
+
+        $this->assertStringContainsString('rev='.$oldMtime, $html);
+    }
+
+    /** $DATE_AT applies to a sized diagram's resized-copy URL too. */
+    public function testDateAtAppliesToASizedDiagramToo()
+    {
+        $mediaId = 'test:revvedsized.png';
+        $oldMtime = time() - 120;
+        $this->archiveOldMediaRevision($mediaId, 'first-version', $oldMtime);
+        $this->createMedia($mediaId, 'second-version');
+
+        $html = $this->renderAtDate('{{drawio>test:revvedsized?200}}', time() - 60);
+
+        $this->assertStringContainsString('rev='.$oldMtime, $html);
+        $this->assertStringContainsString('w=200', $html);
     }
 }

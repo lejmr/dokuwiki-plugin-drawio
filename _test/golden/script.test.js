@@ -333,3 +333,40 @@ console.log('OK: every ajax call carries the DokuWiki security token (sectok)');
 }
 
 console.log('OK: two diagrams get two independent draft keys (#26)');
+
+// --- 12: issue #62 - the "Edit with draw.io" button opens the same editor -
+// as the image click (syntax.php renders the button; this only has to
+// prove drawioEditButtonClick() finds the image by id and hands it to
+// edit(), which is what the rest of this file already exercises).
+{
+    const { sandbox, postCalls } = buildSandbox();
+    loadScript(sandbox);
+
+    const image = makeImage('editbtn.png');
+    sandbox.document.getElementById = (id) => (id === 'editbtn.png' ? image : null);
+    const button = makeImage('editbtn.png'); // reused only for its getAttribute()
+    button.setAttribute('data-image-id', 'editbtn.png');
+
+    sandbox.drawioEditButtonClick(button);
+
+    const authCall = postCalls.find((c) => c.data && c.data.action === 'get_auth');
+    assert.ok(authCall, 'the edit button must open the diagram via edit(), which asks get_auth first');
+    assert.strictEqual(authCall.data.imageName, 'editbtn.png');
+}
+
+console.log('OK: the "Edit with draw.io" button opens the same editor as clicking the image (#62)');
+
+// --- 13: issue #50 - a configured top_offset pushes the iframe down -------
+{
+    const { sandbox, iframes } = buildSandbox();
+    sandbox.JSINFO.plugin_drawio.topOffset = 56;
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('topoffset.png'));
+
+    const style = iframes[iframes.length - 1].getAttribute('style');
+    assert.ok(style.includes('top:56px'), 'iframe style must carry the configured top offset: ' + style);
+    assert.ok(style.includes('height:calc(100vh - 56px)'), 'iframe height must shrink by the offset: ' + style);
+}
+
+console.log('OK: a configured top_offset pushes the editor iframe down and shrinks it to match (#50)');

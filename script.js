@@ -107,6 +107,17 @@ var imagePointer = null;
 // not fixed here, needs a real UI (e.g. a close button/timeout on the iframe).
 var editorOpen = false;
 
+// issue #62: the "Edit with draw.io" button syntax.php renders under a
+// diagram (conf['edit_button']) when the image itself is invisible - an
+// empty diagram draw.io saves is a valid, unclickable 1x1px PNG - so this
+// looks the image up by id rather than needing a direct element reference,
+// the same trick the media manager button below already relies on.
+function drawioEditButtonClick(button)
+{
+    var image = document.getElementById(button.getAttribute('data-image-id'));
+    if (image) edit(image);
+}
+
 function edit(image)
 {
     // check auth
@@ -180,7 +191,19 @@ function edit_cb(image)
     var iframe = document.createElement('iframe');
     iframe.setAttribute('frameborder', '0');
     iframe.setAttribute('class', 'drawio');
-    iframe.setAttribute('style', 'z-index: ' + zIndex + ';');
+    // issue #50: style.css positions the iframe as top:0/bottom:0/height:100vh,
+    // covering the whole viewport - fine on its own, but a template with a
+    // fixed top navbar (Bootstrap3 among them) then draws over the editor's
+    // own menu bar. topOffset (0 by default, so this is a no-op for anyone
+    // who hasn't set it) pushes the top edge down and shrinks the height by
+    // the same amount, rather than adding padding-top, so the iframe's own
+    // border still starts exactly where the navbar ends.
+    var topOffset = conf['topOffset'] || 0;
+    var iframeStyle = 'z-index: ' + zIndex + ';';
+    if (topOffset > 0) {
+        iframeStyle += 'top:' + topOffset + 'px;height:calc(100vh - ' + topOffset + 'px);';
+    }
+    iframe.setAttribute('style', iframeStyle);
     editorOpen = true;
 
     // The advisory lock's renewal timer, cleared in close() below. One

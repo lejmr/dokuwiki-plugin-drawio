@@ -86,6 +86,11 @@
                 'toolbar_possible_extension' => array_map('trim', explode(",",$this->getConf('toolbar_possible_extension'))),
                 // which draw.io interface the editor opens with (conf/default.php)
                 'ui' => $this->getConf('ui'),
+                // issue #50: pushes the editor iframe down in script.js, so a
+                // template's own fixed top navbar doesn't cover the editor's
+                // menu bar. 0 (the default) leaves the iframe covering the
+                // full viewport, exactly as before this setting existed.
+                'topOffset' => (int) $this->getConf('top_offset'),
                 // lang strings for the JS-only media manager button - plugins have no
                 // core mechanism to add entries to the global JS LANG object, so this
                 // (JSINFO) is the established way to hand a plugin's own translated
