@@ -796,3 +796,127 @@ console.log('OK: a missing/zero top_offset leaves the iframe style unchanged (#5
 }
 
 console.log('OK: an explicit top_offset of 0 also leaves the iframe style unchanged (#50)');
+
+// --- issue #30: drawioInitInteractive() edge cases -------------------------
+
+// No configured viewer_url at all (a page whose cached JSINFO predates this
+// setting) must still fall back to draw.io's public viewer script, the same
+// fallback shape every other optional JSINFO key in this file already has.
+{
+    const { sandbox, iframes } = buildSandbox(); // viewer_url absent from JSINFO
+    sandbox.document.querySelectorAll = () => [{ children: [], nextElementSibling: null }];
+    loadScript(sandbox);
+
+    sandbox.drawioInitInteractive();
+
+    assert.strictEqual(iframes[0].getAttribute('src'), 'https://viewer.diagrams.net/js/viewer-static.min.js');
+}
+
+console.log('OK: a missing viewer_url config falls back to draw.io\'s public viewer script (#30)');
+
+// A container without a '.drawio-interactive-fallback' sibling (or none at
+// all) must not throw - only syntax.php's own markup ever has one, but a
+// hostile/edited DOM must not crash this the same way every other DOM
+// access in this file is defended (#16).
+{
+    const { sandbox, iframes } = buildSandbox();
+    sandbox.MutationObserver = function () { this.observe = () => {}; this.disconnect = () => {}; };
+    sandbox.document.querySelectorAll = () => [{ children: [], nextElementSibling: null }];
+    loadScript(sandbox);
+
+    assert.doesNotThrow(() => sandbox.drawioInitInteractive());
+    assert.strictEqual(iframes.length, 1, 'the viewer script must still be injected');
+}
+
+console.log('OK: drawioInitInteractive() tolerates a container with no fallback sibling (#30)');
+
+// A container that already has a rendered child (the viewer having run
+// synchronously, e.g. from GraphViewer.cachedUrls) hides the fallback
+// immediately, without waiting on a MutationObserver callback.
+{
+    const { sandbox, iframes } = buildSandbox();
+    sandbox.MutationObserver = function () { this.observe = () => {}; this.disconnect = () => {}; };
+    const fallback = { classList: { contains: (c) => c === 'drawio-interactive-fallback' }, hidden: false };
+    const container = { children: [{}], nextElementSibling: fallback };
+    sandbox.document.querySelectorAll = () => [container];
+    loadScript(sandbox);
+
+    sandbox.drawioInitInteractive();
+
+    assert.strictEqual(fallback.hidden, true, 'a container already carrying a rendered child must hide its fallback right away');
+    assert.strictEqual(iframes.length, 1, 'the viewer script is still injected for an already-rendered container');
+}
+
+console.log('OK: an already-rendered container hides its fallback sibling immediately (#30)');
+
+// Acceptance row 9, for real: GraphViewer inserts its own (empty) SVG
+// canvas into a container the instant it starts working on it - well
+// before it has fetched/parsed that container's XML - so a 404 (or
+// anything else it can't parse) makes it throw *after* the container
+// already has a child. Checking container.children.length alone (as the
+// code used to) would hide the fallback and leave an uncaught console
+// error for exactly the row-9 case. drawioInitInteractive() now runs its
+// own existence check (a HEAD against the same fetch.php URL) before ever
+// letting GraphViewer see the container, and must not request the viewer
+// script at all until every such check has settled - proven here with a
+// controllable fetch() so the ordering, not just the end state, is
+// checked.
+(async () => {
+    // document.querySelectorAll deliberately left at buildSandbox()'s
+    // default (returns []) until after loadScript(): loadScript() itself
+    // triggers one drawioInitInteractive() run via the jQuery-ready
+    // callback at the bottom of script.js (this sandbox's jQuery(fn) calls
+    // fn() synchronously) - if the container were already wired up by
+    // then, that run would fire too, doubling every count this test
+    // asserts on. One explicit, single call below is what is under test.
+    const { sandbox, iframes } = buildSandbox();
+    sandbox.MutationObserver = function () { this.observe = () => {}; this.disconnect = () => {}; };
+    loadScript(sandbox);
+
+    let resolveFetch;
+    const fetchCalls = [];
+    sandbox.fetch = (url, opts) => {
+        fetchCalls.push({ url, opts });
+        return new Promise((resolve) => { resolveFetch = resolve; });
+    };
+
+    const fallback = { classList: { contains: (c) => c === 'drawio-interactive-fallback' }, hidden: false };
+    let removedClass = null;
+    const container = {
+        children: [],
+        nextElementSibling: fallback,
+        getAttribute: (name) => (name === 'data-mxgraph'
+            ? JSON.stringify({ url: '/lib/exe/fetch.php?media=test:missing.drawio' })
+            : null),
+        classList: { remove: (cls) => { removedClass = cls; } },
+    };
+    sandbox.document.querySelectorAll = () => [container];
+
+    sandbox.drawioInitInteractive();
+
+    assert.strictEqual(fetchCalls.length, 1, 'a container with a data-mxgraph url must be existence-checked');
+    assert.strictEqual(fetchCalls[0].url, '/lib/exe/fetch.php?media=test:missing.drawio',
+        'the check must hit the exact same fetch.php url the viewer itself would use');
+    assert.strictEqual(fetchCalls[0].opts.method, 'HEAD', 'the existence check must be a HEAD, not a full GET');
+    assert.strictEqual(iframes.length, 0,
+        'the viewer script must not be requested before the existence check settles');
+
+    resolveFetch({ ok: false }); // the .drawio source 404s
+    // A real setTimeout (this test's own Node realm), not another
+    // Promise.resolve() tick: script.js's Promise.all runs inside the vm
+    // sandbox's own separate realm, so settling the cross-realm fetch()
+    // promise above takes a few microtask hops to propagate - a macrotask
+    // boundary is what reliably waits out all of them, in any V8 version.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(removedClass, 'mxgraph',
+        "a 404'd source must be pulled out of GraphViewer's own scan (its 'mxgraph' class)");
+    assert.strictEqual(iframes.length, 1, 'the viewer script is still requested once checks settle (other diagrams may need it)');
+    assert.strictEqual(fallback.hidden, false,
+        'a container GraphViewer never touched must never have its fallback hidden');
+
+    console.log("OK: a 404'd .drawio source is kept out of GraphViewer's scan, and its fallback is never hidden (#30 row 9)");
+})().catch((e) => {
+    console.error(e);
+    process.exitCode = 1;
+});

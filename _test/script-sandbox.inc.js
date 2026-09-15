@@ -242,6 +242,11 @@ function buildSandbox() {
             },
             body: { appendChild() {}, removeChild() {} },
             getElementById: () => null,
+            // issue #30: drawioInitInteractive() - defaults to "no
+            // interactive diagram on this page"; a test overrides this
+            // directly (same pattern as getElementById above) to return a
+            // fake list of '.drawio-interactive' containers.
+            querySelectorAll: () => [],
         },
         window: {
             addEventListener: (evt, fn) => { if (evt === 'message') messageListeners.push(fn); },

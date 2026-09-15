@@ -370,3 +370,111 @@ console.log('OK: the "Edit with draw.io" button opens the same editor as clickin
 }
 
 console.log('OK: a configured top_offset pushes the editor iframe down and shrinks it to match (#50)');
+
+// --- 14: issue #30 - the viewer script is injected exactly once when the -
+// page has an interactive diagram, and not at all otherwise --------------
+{
+    // no .drawio-interactive on the page: document.querySelectorAll's
+    // default stub (script-sandbox.inc.js) returns [] - nothing to inject.
+    const { sandbox, iframes } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.drawioInitInteractive();
+
+    assert.strictEqual(iframes.length, 0,
+        'a page with no .drawio-interactive must load no third-party viewer script (#42)');
+}
+
+console.log('OK: a page without an interactive diagram never loads the viewer script (#30, #42)');
+
+{
+    const { sandbox, iframes } = buildSandbox();
+    sandbox.JSINFO.plugin_drawio.viewer_url = 'https://viewer.example.org/js/viewer-static.min.js';
+    sandbox.document.querySelectorAll = () => [{ children: [], nextElementSibling: null }];
+    loadScript(sandbox);
+
+    sandbox.drawioInitInteractive();
+    sandbox.drawioInitInteractive(); // a second run (e.g. MEDIAMANAGER_STARTED too) must not stack a second script
+
+    assert.strictEqual(iframes.length, 1, 'the viewer script must be injected exactly once');
+    assert.strictEqual(iframes[0].getAttribute('src'), 'https://viewer.example.org/js/viewer-static.min.js',
+        'the injected script must point at the configured viewer_url');
+}
+
+console.log('OK: a page with an interactive diagram loads the configured viewer script exactly once (#30)');
+
+// --- 15: acceptance batch 4 row 3 - after a successful save, an interactive
+// diagram re-renders on the page immediately, with no reload ---------------
+//
+// edit_cb() is invoked with the interactive container itself, exactly as
+// edit()/drawioEditButtonClick() resolve it in the real DOM (syntax.php
+// gives the container the diagram's own media id, and duplicate-id lookup
+// - document.getElementById(mediaId) - finds it before the fallback <img>,
+// which carries the same id further down the page). Its 'mxgraph' class is
+// deliberately left off up front, as drawioInitInteractive()'s 404 check
+// would do for a diagram with no .drawio source yet - the save below is
+// what creates that source, so the fix must restore the class.
+{
+    function makeInteractiveContainer(id, url) {
+        const attrs = { id, 'data-mxgraph': JSON.stringify({ url, highlight: '#0000ff' }) };
+        const classes = new Set(['drawio-interactive']); // no 'mxgraph' yet
+        const container = {
+            children: [{}], // GraphViewer's previous render
+            getAttribute(name) {
+                return Object.prototype.hasOwnProperty.call(attrs, name) ? attrs[name] : null;
+            },
+            setAttribute(name, value) { attrs[name] = value; },
+            removeChild(child) {
+                const i = container.children.indexOf(child);
+                if (i !== -1) container.children.splice(i, 1);
+            },
+            classList: {
+                contains: (c) => classes.has(c),
+                add: (c) => classes.add(c),
+                remove: (c) => classes.delete(c),
+            },
+        };
+        Object.defineProperty(container, 'firstChild', { get: () => container.children[0] || null });
+        return container;
+    }
+
+    const originalUrl = '/lib/exe/fetch.php?media=ns:plan.drawio';
+    const container = makeInteractiveContainer('ns:plan.png', originalUrl);
+
+    const { sandbox, messageListeners, iframes, postCalls } = buildSandbox();
+    const viewerCalls = [];
+    sandbox.window.GraphViewer = {
+        createViewerForElement: (el) => viewerCalls.push(el),
+    };
+    loadScript(sandbox);
+
+    sandbox.edit_cb(container);
+    const receive = messageListeners[messageListeners.length - 1];
+    const source = iframes[iframes.length - 1].contentWindow;
+
+    receive({ source, data: JSON.stringify({ event: 'save', xml: '<mxGraphModel>new label</mxGraphModel>' }) });
+    receive({
+        source,
+        data: JSON.stringify({ event: 'export', format: 'xmlpng', data: 'data:image/png;base64,Zm9v' }),
+    });
+
+    const saveCall = postCalls.find((c) => c.data && c.data.action === 'save');
+    assert.ok(saveCall && typeof saveCall.doneCb === 'function', 'test setup: save must be postable');
+    assert.strictEqual(viewerCalls.length, 0, 'must not re-render before the save actually succeeds');
+
+    saveCall.doneCb(); // the server confirms the save
+
+    const cfg = JSON.parse(container.getAttribute('data-mxgraph'));
+    assert.ok(/[?&]t=\d+/.test(cfg.url), 'the container\'s data-mxgraph url must gain a cache-buster: ' + cfg.url);
+    assert.strictEqual(cfg.url.replace(/[?&]t=\d+/, ''), originalUrl,
+        'the cache-buster must be the only change to the url: ' + cfg.url);
+
+    assert.strictEqual(viewerCalls.length, 1, 'GraphViewer.createViewerForElement must be called exactly once');
+    assert.strictEqual(viewerCalls[0], container, 'it must be called with the container itself');
+
+    assert.strictEqual(container.children.length, 0, 'the previous render must be cleared before re-creating it');
+    assert.ok(container.classList.contains('mxgraph'),
+        "the 'mxgraph' class must be restored before re-creating the viewer");
+}
+
+console.log('OK: saving an interactive diagram re-renders it immediately - cache-busted url, cleared, GraphViewer.createViewerForElement() called once (batch 4 row 3)');

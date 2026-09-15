@@ -144,3 +144,31 @@ way back into the diagram, ever.
     this empty one included - click it to reopen the same diagram.
 
 {{drawio>new:empty_diagram}}
+
+===== 12. Interactive viewer (issue #30) =====
+
+A diagram can render with draw.io's own **interactive viewer** instead of a
+static picture: links inside it are clickable, and it comes with its own
+zoom/pan/layers/lightbox toolbar - no click needed to open the editor just to
+follow a link.
+
+  - Click the placeholder below to create a brand new diagram with the
+    editor.
+  - Draw a shape, select it, then add a link to it (the link icon in the
+    format panel on the right, or right-click → **Edit Link**) - e.g.
+    ''https://dokuwiki.org''. Save and close the editor.
+  - No reload needed: the diagram below re-renders with draw.io's viewer
+    script as soon as the save completes. Click the shape's link: it opens
+    directly, without opening the editor first.
+  - The **Edit with draw.io** button underneath still opens the same editor
+    as before - an interactive diagram has no image to click on, so that
+    button is always there for one, regardless of the site-wide
+    ''edit_button'' setting.
+  - **Admin → Configuration Settings → drawio** has two new settings:
+    ''interactive'' (make every diagram interactive by default; a single
+    diagram can still opt out with ''{{drawio>...?static}}'') and
+    ''viewer_url'' (which draw.io viewer script to load - defaults to
+    diagrams.net's own hosted one; a self-hosted draw.io serves the same
+    file at ''<host>/js/viewer-static.min.js'').
+
+{{drawio>new:interactive?interactive}}

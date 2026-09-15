@@ -317,6 +317,141 @@ class syntax_plugin_drawio_golden_test extends DokuWikiTest
         return $plugin->render('odt', $renderer, $data);
     }
 
+    /**
+     * issue #30: ?interactive renders draw.io's own viewer markup, pointing
+     * at the diagram's *source* (ns:plan.drawio) through fetch.php - never
+     * the XML itself inlined into the page, and the "Edit with draw.io"
+     * button always renders, even with edit_button off (the default).
+     */
+    public function testInteractiveParamRendersTheViewerContainer()
+    {
+        $this->createMedia('test:present.png');
+        $this->createMedia('test:present.drawio', $this->realDrawioXml());
+
+        $html = $this->render('{{drawio>test:present?interactive}}');
+
+        $this->assertStringContainsString("class='mxgraph drawio-interactive'", $html);
+        $this->assertStringContainsString(
+            "fetch.php?media=test:present.drawio",
+            $html
+        );
+        // The url lives inside a json_encode()'d, hsc()'d data-mxgraph
+        // attribute - '&' from the query string (there is none here, but a
+        // rev= param would add one) must come out as '&amp;', never
+        // double-escaped, and the raw XML must never appear in the page.
+        $this->assertStringContainsString('data-mxgraph=', $html);
+        $this->assertStringNotContainsString(htmlspecialchars($this->realDrawioXml()), $html);
+        $this->assertStringNotContainsString($this->realDrawioXml(), $html);
+        $this->assertStringContainsString('<button', $html);
+        $this->assertStringContainsString("data-image-id='test:present.png'", $html);
+        $this->assertStringContainsString('drawioEditButtonClick(this)', $html);
+    }
+
+    /**
+     * issue #30: ?static always wins over the site-wide 'interactive'
+     * config default, rendering the plain <img> exactly as before.
+     */
+    public function testStaticParamOverridesTheInteractiveConfigDefault()
+    {
+        $this->setConf('interactive', 1);
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present?static}}');
+
+        $this->assertStringNotContainsString('drawio-interactive', $html);
+        $this->assertStringContainsString("<img class='mediacenter'", $html);
+    }
+
+    /**
+     * issue #30: with no param either way, the 'interactive' config default
+     * decides - on renders the viewer, off (the default) renders the <img>.
+     */
+    public function testInteractiveConfigDefaultAppliesWithNoParam()
+    {
+        $this->setConf('interactive', 1);
+        $this->createMedia('test:present.png');
+        $this->createMedia('test:present.drawio', $this->realDrawioXml());
+
+        $html = $this->render('{{drawio>test:present}}');
+
+        $this->assertStringContainsString('drawio-interactive', $html);
+    }
+
+    /**
+     * issue #30: sizing still applies - a max-width container, sized via
+     * plain CSS since the viewer (not fetch.php) is what actually renders
+     * the diagram; title still becomes the container's title attribute.
+     */
+    public function testInteractiveSizeAndTitleAreApplied()
+    {
+        $this->createMedia('test:present.png');
+        $this->createMedia('test:present.drawio', $this->realDrawioXml());
+
+        $html = $this->render('{{drawio>test:present?interactive&200x100|mouse-over text}}');
+
+        $this->assertStringContainsString('max-width:100%', $html);
+        $this->assertStringContainsString('width:200px', $html);
+        $this->assertStringContainsString('height:100px', $html);
+        $this->assertStringContainsString("title='mouse-over text'", $html);
+    }
+
+    /**
+     * issue #30: a diagram with no .drawio source yet still renders the
+     * viewer container (the viewer's own XHR will 404 against fetch.php),
+     * plus the fallback <img> a visitor sees until/unless the viewer
+     * script actually renders something - see script.js's
+     * drawioInitInteractive().
+     */
+    public function testInteractiveWithNoSourceYetRendersAFallbackImage()
+    {
+        $this->createMedia('test:nosource.png');
+
+        $html = $this->render('{{drawio>test:nosource?interactive}}');
+
+        $this->assertStringContainsString("class='mxgraph drawio-interactive'", $html);
+        $this->assertStringContainsString('fetch.php?media=test:nosource.drawio', $html);
+        $this->assertStringContainsString("class='drawio-interactive-fallback'", $html);
+        $this->assertStringContainsString('fetch.php?media=test:nosource.png', $html);
+        $this->assertStringContainsString('onerror', $html);
+        $this->assertStringContainsString('blank-image.png', $html);
+    }
+
+    /**
+     * issue #30, acceptance row 4: an interactive diagram's markup must be
+     * byte-identical for every visitor who can read it - it is the viewer's
+     * own client-side XHR against fetch.php, at request time, that decides
+     * what (if anything) actually loads, exactly like the plain <img> path
+     * already works. Nothing server-side may vary this HTML by who is
+     * asking - not the container, not the data-mxgraph JSON, not the
+     * fallback or the edit button.
+     */
+    public function testInteractiveMarkupIsByteIdenticalRegardlessOfWhoIsAsking()
+    {
+        $this->createMedia('test:present.png');
+        $this->createMedia('test:present.drawio', $this->realDrawioXml());
+
+        $this->enableAcl(['* @ALL 8'], '');
+        $anonHtml = $this->render('{{drawio>test:present?interactive}}');
+
+        $this->enableAcl(['* @ALL 8'], 'admin', ['admin']);
+        $adminHtml = $this->render('{{drawio>test:present?interactive}}');
+
+        $this->assertSame($anonHtml, $adminHtml);
+        $this->assertStringNotContainsString('<mxfile', $anonHtml);
+    }
+
+    /**
+     * A real draw.io export's XML, for the tests above that need the source
+     * itself to look like one (isDiagramXml() et al aren't exercised by
+     * render(), but a byte-identical-looking source is still closer to a
+     * real diagram than an arbitrary string).
+     */
+    private function realDrawioXml()
+    {
+        $helper = plugin_load('helper', 'drawio');
+        return $helper->extractSvgXml(file_get_contents(__DIR__ . '/../real-drawio-export.svg'));
+    }
+
     public function testOdtModeEmbedsTheDiagramAsAnImage()
     {
         $this->createMedia('test:present.png', 'not-really-a-png');

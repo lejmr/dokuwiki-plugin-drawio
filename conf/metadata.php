@@ -41,3 +41,10 @@ $meta['edit_button'] = array('onoff');
 // else (a unit suffix, a negative number) would silently break the iframe's
 // CSS in script.js rather than fail loudly here.
 $meta['top_offset'] = array('numeric', '_pattern' => '/^\d+$/');
+// issue #30: a plain checkbox - onoff already stores/reads the 0/1
+// getConf('interactive') is checked against.
+$meta['interactive'] = array('onoff');
+// issue #30: the URL of draw.io's viewer-static.min.js - a plain string,
+// same as 'url' above, since it points at anything from the public
+// diagrams.net host to a self-hosted draw.io.
+$meta['viewer_url'] = array('string');

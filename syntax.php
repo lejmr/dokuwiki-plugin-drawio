@@ -141,6 +141,20 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         }
 
         $linkonly = in_array('linkonly', $params);
+
+        // issue #30: ?static/?interactive always win over the config
+        // default (conf/default.php's 'interactive') - two params, not one,
+        // because the default itself can be either value, so "neither param
+        // given" has to stay distinguishable from "asked for whatever the
+        // default currently is".
+        if (in_array('static', $params)) {
+            $interactive = false;
+        } elseif (in_array('interactive', $params)) {
+            $interactive = true;
+        } else {
+            $interactive = (bool) $this->getConf('interactive');
+        }
+
         $width = $height = null;
         foreach ($params as $param) {
             if (preg_match('/^(\d+)(?:x(\d+))?$/', $param, $m)) {
@@ -382,11 +396,104 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         }
         $placeholder = DOKU_BASE."lib/plugins/drawio/blank-image.png";
 
-        $renderer->doc .= "<img class='mediacenter' id='".hsc($media_id)."'
+        $img = "<img class='mediacenter' id='".hsc($media_id)."'
                         style='".$style."' onclick='edit(this);'
                         src='".$src."'
                         onerror=\"this.onerror=null;this.src='".$placeholder."';\"
                         alt='".hsc($alt)."'".($title !== null ? " title='".hsc($title)."'" : "")." />";
+
+        $editButton = "<button type='button' class='drawio-editbutton'
+                        style='display:block;margin:0.25em auto 0;font-size:85%;'
+                        data-image-id='".hsc($media_id)."' onclick='drawioEditButtonClick(this);'
+                        >".hsc($this->getLang('editbutton'))."</button>";
+
+        // issue #30: draw.io's own viewer instead of a static image - links
+        // inside the diagram stay clickable, plus zoom/pan/layers/lightbox.
+        //
+        // Deliberately NOT the diagram's XML inlined into the page: that
+        // would make the xhtml differ by ACL/existence, which is exactly
+        // what the long comment above this method exists to prevent. Instead
+        // this emits the viewer's own documented markup (GraphViewer.
+        // createViewerForElement(), jgraph/drawio's src/main/webapp/js/
+        // diagramly/GraphViewer.js) - a 'data-mxgraph' JSON attribute whose
+        // 'url' the viewer fetches itself, client-side, with a plain XHR GET
+        // (GraphViewer.getUrl()) once its script has loaded - so the
+        // existence/ACL decision stays exactly where it already lives for
+        // the image case: fetch.php, at request time, per visitor. json_
+        // encode() then hsc() (never the other order - the attribute must
+        // end up with '&' as '&amp;', not double-escaped) is what actually
+        // gets a JSON string safely into a single-quoted HTML attribute.
+        //
+        // The url points at the diagram's *source* (ns:plan.drawio, see
+        // helper::sourceID()), not its rendering - the viewer needs XML, not
+        // a picture. fetch.php serves it fine with no changes: '.drawio' has
+        // no registered mimetype (conf/mime.conf), so mimetype($media,
+        // false) falls back to [$ext, 'application/octet-stream', true] -
+        // "download" (Content-Disposition: attachment) rather than inline,
+        // but that only affects a *navigation*, never an XHR's ability to
+        // read the response body, and checkFileStatus() enforces the same
+        // namespace read ACL either way (inc/fetch.functions.php - it keys
+        // purely on mediaAclPath($media), never on the extension). Verified
+        // against a real DokuWiki checkout's fetch.functions.php/mime.conf;
+        // no mime.conf entry needed, and none is added, since editing
+        // mime.local.conf is not something this plugin can do for a user
+        // anyway.
+        //
+        // 'highlight'/'nav'/'resize'/'toolbar'/'lightbox' are the same
+        // documented GraphViewer config keys draw.io's own embed docs use;
+        // 'toolbar' lists zoom/layers/lightbox because those are the only
+        // toolbar buttons that mean anything without draw.io's separate
+        // comments backend, which this plugin does not integrate with.
+        if ($interactive) {
+            $helper = plugin_load('helper', 'drawio');
+            $src_id = $helper ? $helper->sourceID($media_id) : '';
+            // Not html-escaped like $revParam above: this becomes part of a
+            // JSON string, and the whole attribute is hsc()'d as one string
+            // right below - escaping '&' here first would leave '&amp;amp;'
+            // in the page.
+            $revParamRaw = $rev !== '' ? "&rev=".$rev : '';
+            $sourceUrl = DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($src_id).$revParamRaw;
+
+            $divStyle = "max-width:100%;";
+            if ($width !== null) {
+                $divStyle .= "width:".$width."px;".($height !== null ? "height:".$height."px;" : "");
+            }
+            $mxConfig = array(
+                'url' => $sourceUrl,
+                'highlight' => '#0000ff',
+                'nav' => true,
+                'resize' => true,
+                'toolbar' => 'zoom layers lightbox',
+                'lightbox' => true,
+            );
+            $renderer->doc .= "<div class='mxgraph drawio-interactive' id='".hsc($media_id)."'"
+                            .($title !== null ? " title='".hsc($title)."'" : "")
+                            ." style='".$divStyle."'"
+                            ." data-mxgraph='".hsc(json_encode($mxConfig))."'></div>";
+
+            // issue #30: a diagram with no .drawio source yet (never opened/
+            // saved since this feature shipped) makes the viewer's XHR 404 -
+            // this fallback <img>, a sibling of the div above (never a
+            // child: the viewer only ever appends into its container, it
+            // never needs to clear it first, but a sibling is correct either
+            // way and costs nothing), is what a visitor sees until, and
+            // unless, the viewer script actually renders something into it -
+            // see script.js's drawioInitInteractive() for the client side of
+            // this. Same fetch.php image URL and onerror placeholder as the
+            // plain <img> path above, wrapped so script.js can find and hide
+            // it by class alone.
+            $renderer->doc .= "<div class='drawio-interactive-fallback'>".$img."</div>";
+
+            // Always rendered here (unlike the plain-image path below, where
+            // it is opt-in via edit_button) - there is no image to click at
+            // all when the viewer script hasn't loaded (or has nothing to
+            // show), so this is the only click target a diagram-less
+            // interactive placeholder has.
+            $renderer->doc .= $editButton;
+            return true;
+        }
+
+        $renderer->doc .= $img;
 
         // issue #62: an explicit "Edit with draw.io" button under the image,
         // for wikis that want a click target that stays clickable even for a
@@ -397,10 +504,7 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         // existence check is added and the xhtml stays the same for every
         // viewer, exactly like the image above.
         if ($this->getConf('edit_button')) {
-            $renderer->doc .= "<button type='button' class='drawio-editbutton'
-                        style='display:block;margin:0.25em auto 0;font-size:85%;'
-                        data-image-id='".hsc($media_id)."' onclick='drawioEditButtonClick(this);'
-                        >".hsc($this->getLang('editbutton'))."</button>";
+            $renderer->doc .= $editButton;
         }
         return true;
     }
