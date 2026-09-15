@@ -37,7 +37,7 @@
          */
 
 	    function addjsinfo($event, $params){
-            global $JSINFO;
+            global $JSINFO, $conf;
 	        $JSINFO['plugin_drawio'] = [
                 'zIndex' => $this->getConf('zIndex'),
                 'url' => $this->getConf('url'),
@@ -47,6 +47,13 @@
                 // (JSINFO) is the established way to hand a plugin's own translated
                 // strings to its script.js
                 'editbutton' => $this->getLang('editbutton'),
+                'lockwarning' => $this->getLang('lockwarning'),
+                // So script.js can renew the advisory lock (see close()'s
+                // comment for why renewal exists at all) on an interval that
+                // scales with however this wiki has core's own lock expiry
+                // configured, rather than a fixed guess that would be wrong
+                // for any site that changed it from the 900s/15min default.
+                'locktime' => (int) $conf['locktime'],
                 // CSRF token for the ajax calls below. Core publishes the very
                 // same value in every page's HTML itself - see tpl_metaheaders()
                 // (JSINFO is printed inline) and formSecurityToken(), which puts
@@ -112,6 +119,55 @@
             }
             chmod($fl, $conf['fmode']);
             return true;
+        }
+
+        /**
+         * The id core's lock()/checklock() (inc/common.php) key a diagram's
+         * advisory lock under.
+         *
+         * Three things are deliberate here, not accidents of reuse:
+         *
+         * Shared between a diagram's png and svg. sourceID() is the existing
+         * "these two media ids are renderings of one diagram" identity (see
+         * helper.php) - reusing it here means opening ns:plan.svg while
+         * someone else has ns:plan.png open warns about them too, which is
+         * what "the same diagram" has to mean for a lock as much as it does
+         * for the stored XML. Falls back to $media_id itself for a name
+         * sourceID() does not recognise (not currently reachable - 'lock' is
+         * only ever posted for the .png/.svg id script.js already opened -
+         * but a fallback beats a fatal for input this function was never
+         * handed a guarantee about).
+         *
+         * Collision-free against a page lock, fully, by construction - not
+         * just for the case that happened to be checked. Core keys every
+         * lock - a page's or, now, a diagram's - purely by
+         * md5(cleanID($id)) (wikiLockFN(), inc/pageutils.php), with nothing
+         * in the lock file itself saying which kind of thing was locked. An
+         * earlier version of this reasoning stopped at "cleanID() does not
+         * strip an internal extension, so 'ns:plan' and 'ns:plan.drawio'
+         * clean to different strings" - true, but incomplete: a DokuWiki
+         * page id may contain dots anywhere (they are only special at an
+         * id's boundaries), so a page literally named 'ns:plan.drawio' is a
+         * legal id, and would have shared this diagram's lock file exactly.
+         * The 'drawio:' prefix below closes that for good: no page id this
+         * plugin writes to (or reads a diagram from) ever starts with it,
+         * because 'drawio' is not a namespace segment this plugin's own ids
+         * (media ids under whatever namespace a diagram lives in) ever
+         * introduce on their own - the prefix is added here, once, never by
+         * anything a caller controls the rest of.
+         *
+         * Not shared with unlock(). There is no unlock() call in this
+         * plugin any more - see script.js's close() and its comment for why
+         * (briefly: one open tab must never be able to delete another open
+         * tab's, or another user's, protection just by closing).
+         *
+         * @param string $media_id e.g. 'ns:plan.png'
+         * @return string          e.g. 'drawio:ns:plan.drawio'
+         */
+        private function _lock_id($media_id) {
+            $helper = plugin_load('helper', 'drawio');
+            $src_id = $helper ? $helper->sourceID($media_id) : '';
+            return 'drawio:' . ($src_id !== '' ? $src_id : $media_id);
         }
 
         /**
@@ -490,6 +546,53 @@
 					}
 				}
             }
+            // Advisory diagram lock. Not a hard lock - core's own posture for
+            // pages (checklock()'s warning does not stop the edit form from
+            // opening), kept deliberately: a stale lock from a forgotten tab
+            // is worse than the rare real collision. Reports who (if anyone)
+            // already holds it, then takes/refreshes it either way - reusing
+            // core's lock()/checklock() (inc/common.php) as-is. See
+            // _lock_id() above for how the id is chosen so this never
+            // collides with a page lock.
+            //
+            // There is deliberately no 'unlock' action any more. It looked
+            // like the obvious complement, and an earlier version of this
+            // had one, called from script.js's close() - but the lock file
+            // is one shared resource per diagram, not one per tab: closing
+            // *either* of two tabs on the same diagram (one person, two
+            // tabs), or closing the .png tab of a .png/.svg pair someone
+            // else has the .svg of open, deleted the *other* tab's
+            // protection while it was still being actively edited. Verified
+            // live. Dropping the explicit unlock fixes that by construction
+            // - no open tab can ever delete another one's lock - at the cost
+            // that after a clean close, a stale "someone had this open
+            // recently" warning can linger for up to $conf['locktime']
+            // (900s/15min by default) before it expires on its own. For an
+            // *advisory* warning nobody is blocked by, that is a cheaper
+            // failure than the one it replaces: a missing "someone has this
+            // open right now" is the case that actually loses work.
+            //
+            // Same permission model as every other action: the access_granted
+            // gate above already ran before this point, so a caller without
+            // AUTH_UPLOAD on the resolved namespace never reaches here at
+            // all - not a hidden 'denied' response, nothing runs. And the
+            // response below is the same shape and takes the same lock
+            // whether or not $fl exists on disk, so this cannot be used to
+            // learn whether a diagram exists in a namespace the caller *can*
+            // read - the thing SECURITY.md already closed once for rendering.
+            if ($action == 'lock') {
+                $lock_id = $this->_lock_id($media_id);
+                $holder = checklock($lock_id);
+                $since = ($holder !== false) ? @filemtime(wikiLockFN($lock_id)) : null;
+                lock($lock_id);
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'locked_by' => $holder !== false ? $holder : null,
+                    'since' => $since,
+                ]);
+                return;
+            }
+
             if($action == 'get_png' || $action == 'get_svg'){
 				if (!file_exists($fl)) return;
                 // Return image in the base64 for draw.io
@@ -545,6 +648,23 @@
                     http_status(500);
                     return;
                 }
+
+                // Renews the lock too, same as script.js's own interval
+                // timer does (see close()'s comment there) - belt and
+                // braces: autosave/'save' fire on a model *change*, not on a
+                // timer, so they are not a substitute for the interval, but
+                // renewing here as well covers a background tab whose
+                // timers a browser has throttled while its user is actively
+                // typing. A caller that predates the interval (an old
+                // cached script.js) still gets some renewal out of this
+                // alone.
+                //
+                // $media_id here is 'name.draft' (the '.draft' suffix added
+                // above, for every draft_* action) - _lock_id() needs the
+                // diagram's own id, the same one the 'lock' action is
+                // called with, so this derives it from $name again rather
+                // than from $media_id.
+                lock($this->_lock_id(cleanID($name)));
             }
             if($action == 'draft_rm'){
                 // script.js calls this unconditionally after both 'save' and 'exit',

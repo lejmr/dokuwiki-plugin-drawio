@@ -45,6 +45,13 @@ function buildSandbox() {
     const postCalls = [];
     const alerts = [];
     let reloaded = false;
+    // one entry per setInterval() call - {id, fn, ms} - so a test can both
+    // assert on the scheduled interval and fire it manually (this sandbox
+    // has no real event loop). clearedTimers records every id passed to
+    // clearInterval(), in call order.
+    const timers = [];
+    const clearedTimers = [];
+    let nextTimerId = 1;
 
     const sandbox = {
         JSINFO: {
@@ -53,6 +60,7 @@ function buildSandbox() {
                 toolbar_possible_extension: ['png'],
                 zIndex: 999,
                 sectok: 'sek-test-default',
+                locktime: 900,
             },
             id: 'test:page',
         },
@@ -60,6 +68,12 @@ function buildSandbox() {
         localStorage,
         console,
         alert: (msg) => alerts.push(msg),
+        setInterval: (fn, ms) => {
+            const id = nextTimerId++;
+            timers.push({ id, fn, ms });
+            return id;
+        },
+        clearInterval: (id) => { clearedTimers.push(id); },
         jQuery: {
             // Stub network calls: most tests never need their callbacks to fire
             // (drafts are driven straight through localStorage) - but .done()/
@@ -101,6 +115,7 @@ function buildSandbox() {
     vm.createContext(sandbox);
     return {
         sandbox, localStorage, messageListeners, iframes, postCalls, alerts,
+        timers, clearedTimers,
         wasReloaded: () => reloaded,
     };
 }
@@ -525,3 +540,167 @@ function loadMessageFor(serverReply, imageId, ext) {
 }
 
 console.log('OK: opening a diagram prefers the source file and falls back to the image');
+
+// --- advisory diagram lock -------------------------------------------------
+//
+// Two tabs editing the same diagram silently overwriting each other, with no
+// warning to either person, is the bug this whole change is for. The editor
+// must take the lock on open, warn (without blocking) when someone else
+// already holds it, and release it on every way the editor closes.
+
+// opening a diagram must ask the server for the lock, and open regardless
+{
+    const { sandbox, iframes, postCalls } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('lockme.png'));
+
+    const lockCall = postCalls.find((c) => c.data && c.data.action === 'lock');
+    assert.ok(lockCall, 'opening a diagram must ask the server for its lock status');
+    assert.strictEqual(lockCall.data.imageName, 'lockme.png');
+
+    // the editor must not wait for the lock response before opening - same
+    // as it does not wait for draft_get/get_png/get_svg today
+    assert.strictEqual(iframes.length, 1, 'the editor must open without waiting for the lock response');
+}
+
+console.log('OK: opening a diagram asks the server for its lock and does not wait on the answer');
+
+// nobody else holds the lock -> no warning
+{
+    const { sandbox, alerts, postCalls } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('free.png'));
+    const lockCall = postCalls.find((c) => c.data && c.data.action === 'lock');
+    assert.ok(lockCall && lockCall.successCb, 'test setup: lock must be postable');
+    lockCall.successCb({ locked_by: null, since: null });
+
+    assert.strictEqual(alerts.length, 0, 'no one else holds the lock - nothing to warn about');
+}
+
+console.log('OK: no warning is shown when nobody else holds the lock');
+
+// someone else holds the lock -> named in a warning, but the editor still
+// opens either way ("the warning is information, not a gate")
+{
+    const { sandbox, alerts, postCalls } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('contested.png'));
+    const lockCall = postCalls.find((c) => c.data && c.data.action === 'lock');
+    const since = Math.floor(Date.now() / 1000) - 120;
+    lockCall.successCb({ locked_by: 'alice', since });
+
+    assert.strictEqual(alerts.length, 1, 'someone else holding the lock must be warned about');
+    assert.ok(alerts[0].includes('alice'), 'the warning must name who holds it: ' + alerts[0]);
+    // the warning is informational only - nothing about it may have closed
+    // the editor that already opened
+    assert.strictEqual(sandbox.editorOpen, true, 'the editor must stay open after the warning');
+}
+
+console.log('OK: a warning names the existing holder and does not gate opening the editor (informational only)');
+
+// Closing the editor must NOT release the lock any more - not via 'exit',
+// not via a successful save (export). There used to be an 'unlock' call in
+// close() for both; it was removed because the lock file is one shared
+// resource per diagram (not one per tab), so closing either of two tabs on
+// the same diagram deleted the *other* tab's still-active protection - see
+// script.js's close() comment. Simply never unlocking fixes that by
+// construction, so both paths are asserted here to post no 'unlock' at all
+// (there is no such action left server-side either).
+{
+    const { sandbox, messageListeners, iframes, postCalls } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('viaexit.png'));
+    const receive = messageListeners[messageListeners.length - 1];
+    const source = iframes[iframes.length - 1].contentWindow;
+
+    receive({ source, data: JSON.stringify({ event: 'exit' }) });
+
+    assert.ok(!postCalls.some((c) => c.data && c.data.action === 'unlock'),
+        "exiting must not release the lock - it could be someone else's still-open tab or rendering");
+}
+
+console.log("OK: exiting the editor does not release the (shared) lock");
+
+{
+    const { sandbox, messageListeners, iframes, postCalls } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('viasave.png'));
+    const receive = messageListeners[messageListeners.length - 1];
+    const source = iframes[iframes.length - 1].contentWindow;
+
+    receive({
+        source,
+        data: JSON.stringify({ event: 'export', format: 'xmlpng', data: 'data:image/png;base64,Zm9v' }),
+    });
+
+    assert.ok(!postCalls.some((c) => c.data && c.data.action === 'unlock'),
+        'saving and closing must not release the lock either, for the same reason');
+}
+
+console.log('OK: saving and closing the editor does not release the (shared) lock');
+
+// --- lock renewal timer ----------------------------------------------------
+//
+// autosave/'save' only fire on a model *change* (per draw.io's own embed
+// docs), not on a timer, so they cannot by themselves keep the lock alive
+// for someone who opens a diagram and reads it a while before editing -
+// the ordinary prelude to editing, not a forgotten tab. edit_cb() schedules
+// its own renewal interval for exactly that.
+
+// opening schedules a renewal interval comfortably under locktime, and
+// closing clears it
+{
+    const { sandbox, messageListeners, iframes, timers, clearedTimers } = buildSandbox();
+    sandbox.JSINFO.plugin_drawio.locktime = 900; // core's default, seconds
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('renewtimer.png'));
+
+    assert.strictEqual(timers.length, 1, 'opening the editor must schedule exactly one renewal timer');
+    assert.ok(timers[0].ms > 0 && timers[0].ms < 900 * 1000,
+        'the renewal interval must be comfortably under locktime (900s): got ' + timers[0].ms + 'ms');
+
+    const receive = messageListeners[messageListeners.length - 1];
+    const source = iframes[iframes.length - 1].contentWindow;
+    receive({ source, data: JSON.stringify({ event: 'exit' }) });
+
+    assert.deepStrictEqual(clearedTimers, [timers[0].id], 'closing must clear the renewal timer');
+}
+
+console.log('OK: opening schedules a lock-renewal timer under locktime, and closing clears it');
+
+// the timer firing actually re-posts 'lock'
+{
+    const { sandbox, timers, postCalls } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('renewfire.png'));
+    const before = postCalls.filter((c) => c.data && c.data.action === 'lock').length;
+
+    assert.strictEqual(timers.length, 1, 'test setup: a timer must have been scheduled');
+    timers[0].fn(); // simulate the interval firing - this sandbox has no real event loop
+
+    const after = postCalls.filter((c) => c.data && c.data.action === 'lock').length;
+    assert.strictEqual(after, before + 1, 'the renewal timer must re-post the lock action');
+}
+
+console.log('OK: the renewal timer re-posts the lock action while the editor stays open');
+
+// locking disabled site-wide (locktime <= 0, core's own convention) -> no
+// timer to schedule, nothing to renew
+{
+    const { sandbox, timers } = buildSandbox();
+    sandbox.JSINFO.plugin_drawio.locktime = 0;
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('nolocking.png'));
+
+    assert.strictEqual(timers.length, 0, 'locktime <= 0 must not schedule a renewal timer');
+}
+
+console.log('OK: no renewal timer is scheduled when locking is disabled site-wide (locktime <= 0)');

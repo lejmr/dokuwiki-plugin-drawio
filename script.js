@@ -103,13 +103,72 @@ function edit_cb(image)
     iframe.setAttribute('style', 'z-index: ' + zIndex + ';');
     editorOpen = true;
 
+    // The advisory lock's renewal timer, cleared in close() below. One
+    // module-level variable is enough: editorOpen already guards against a
+    // second editor (and so a second timer) ever being open at once.
+    var lockRenewTimer = null;
+
     var close = function()
     {
         window.removeEventListener('message', receive);
         editorOpen = false;
+        if (lockRenewTimer) {
+            clearInterval(lockRenewTimer);
+            lockRenewTimer = null;
+        }
         document.body.removeChild(iframe);
+
+        // No unlock call here on purpose - there used to be one. The lock
+        // file is one shared resource per diagram (see action.php's
+        // _lock_id() - .png and .svg share it too), not one per tab, so
+        // closing *either* of two tabs on the same diagram - one person
+        // with two tabs open, or two different people editing the .png and
+        // the .svg - deleted the *other* tab's protection while it was
+        // still actively being edited. Verified live. Simply never
+        // unlocking fixes that by construction: no open tab can delete
+        // another one's lock, at the cost that a stale "someone had this
+        // open recently" warning can linger for up to $conf['locktime']
+        // (900s/15min by default) after a clean close. For an advisory
+        // warning nobody is blocked by, that is a far cheaper failure than
+        // the one it replaces - a missing warning is the one that actually
+        // loses work.
     };
-    
+
+    // Advisory lock: warn, but never block, when someone else already has
+    // this diagram open. Fired in parallel with opening the editor below,
+    // not awaited - same as draft_get/get_png/get_svg, none of which delay
+    // the iframe either. The lock is taken (or renewed) by this call
+    // regardless of what locked_by says: "whatever the user answers, the
+    // editor opens" - there is no answer to gate on here at all, only
+    // information, so a plain alert() rather than a confirm() whose Cancel
+    // would misleadingly look like it does something.
+    drawioPost('lock', currentDiagramId, null, function (data) {
+        if (!data || !data.locked_by) return;
+        var tmpl = (conf && conf['lockwarning']) ||
+            'This diagram was opened by %USER% %MINUTES% minute(s) ago and may still be open there. Continue anyway?';
+        var minutes = Math.max(0, Math.round((Date.now() / 1000 - data.since) / 60));
+        alert(tmpl.replace('%USER%', data.locked_by).replace('%MINUTES%', minutes));
+    }, true);
+
+    // Keep the lock alive for as long as this editor stays open, on a
+    // plain interval rather than relying on autosave/'save' to do it:
+    // draw.io fires those on a model *change*, not on a timer (see its
+    // embed docs), so someone who opens a diagram and reads it a while
+    // before touching anything - the ordinary prelude to editing, not a
+    // forgotten tab - had no lock left and the next opener got no warning
+    // at all. The interval is a third of $conf['locktime'] (published via
+    // JSINFO so it tracks whatever this wiki has that set to, not a fixed
+    // guess against the 900s/15min default), so a single missed renewal
+    // still leaves margin before expiry. locktime <= 0 means core's own
+    // locking is disabled site-wide - nothing to renew, so no timer either.
+    var locktime = conf && conf['locktime'];
+    if (locktime > 0) {
+        lockRenewTimer = setInterval(function () {
+            drawioPost('lock', currentDiagramId, null, null, true);
+        }, Math.max(10000, Math.floor(locktime * 1000 / 3)));
+    }
+
+
     // The xml the editor sends with its 'save' event, kept until the 'export'
     // event that follows it so the save request can carry the source as well
     // as the picture. It used to be used for the draft and then dropped, which
