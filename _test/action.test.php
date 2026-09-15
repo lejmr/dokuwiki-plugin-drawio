@@ -338,6 +338,10 @@ class action_plugin_drawio_test extends DokuWikiTest
         $this->assertArrayHasKey('plugin_drawio', $JSINFO);
         $this->assertArrayHasKey('url', $JSINFO['plugin_drawio']);
         $this->assertArrayHasKey('toolbar_possible_extension', $JSINFO['plugin_drawio']);
+        // script.js needs this to scale its lock-renewal interval to
+        // whatever this wiki has $conf['locktime'] set to, rather than
+        // guessing a fixed one against the 900s/15min default.
+        $this->assertSame($GLOBALS['conf']['locktime'], $JSINFO['plugin_drawio']['locktime']);
     }
 
     public function testDraftSaveDoesNotFireMediaUploadFinish()
@@ -1152,5 +1156,234 @@ class action_plugin_drawio_test extends DokuWikiTest
         $this->assertSame($mediaId, $this->firedEvents[0][2]);
         $this->assertTrue(is_dir($srcFile), 'the source obstruction must be untouched');
         $this->assertSame([], glob($srcFile . '.*.tmp'), 'a failed source write must not leave an orphaned tmp file');
+    }
+
+    // --- advisory diagram lock -------------------------------------------
+    //
+    // Two tabs editing the same diagram: the second save silently wins and
+    // the first person's work is gone, with no warning to either of them.
+    // These drive the plugin's ajax handler exactly like script.js's 'lock'
+    // call does, and the 'draft_save' renewal alongside it.
+    //
+    // The lock is keyed on 'drawio:' + the diagram's *source* id
+    // (helper->sourceID(), e.g. 'drawio:test:plan.drawio') rather than the
+    // requested media id ('test:plan.png'), for two reasons at once: the
+    // source id is the same "one diagram, two renderings" identity already
+    // used for the stored XML (see helper.php), so opening the .png and the
+    // .svg of the same diagram warn about each other; and the 'drawio:'
+    // prefix makes the key collision-free against a same-named *page*
+    // lock - fully, not just for the id shapes this suite happens to try -
+    // because core's wikiLockFN() keys every lock (page or diagram) purely
+    // by md5(cleanID($id)), with nothing distinguishing which kind of lock
+    // it is, and a page id may contain dots anywhere (only special at an
+    // id's boundaries), so a page literally named e.g. 'test:collide.drawio'
+    // is a legal id that would otherwise share the unprefixed key exactly.
+
+    /**
+     * The same id action.php's _lock_id() derives, computed independently
+     * here (not by calling _lock_id() itself - that would just be asserting
+     * the code agrees with itself) so a test can point wikiLockFN() at the
+     * right file.
+     */
+    protected function lockFileFor($mediaId)
+    {
+        $ext = strtolower(pathinfo($mediaId, PATHINFO_EXTENSION));
+        $srcId = in_array($ext, ['png', 'svg'], true)
+            ? substr($mediaId, 0, -strlen($ext)) . 'drawio'
+            : $mediaId;
+        return wikiLockFN('drawio:' . $srcId);
+    }
+
+    protected function lockRequest($mediaId, $user)
+    {
+        $request = new TestRequest();
+        $request->setServer('REMOTE_USER', $user);
+        $response = @$request->post(
+            [
+                'call' => 'plugin_drawio',
+                'action' => 'lock',
+                'imageName' => $mediaId,
+                'sectok' => $this->validTokenFor($user),
+            ],
+            '/lib/exe/ajax.php'
+        );
+        return $response;
+    }
+
+    public function testLockOfAFreshDiagramReportsNoHolder()
+    {
+        $response = $this->lockRequest('test:fresh.png', 'alice');
+        $data = json_decode($response->getContent(), true);
+        $this->assertNull($data['locked_by'], 'nobody held the lock before this call');
+        $this->assertFileExists($this->lockFileFor('test:fresh.png'), 'the call must take the lock for next time');
+    }
+
+    public function testLockNamesTheExistingHolderAndTakesItAnyway()
+    {
+        $this->lockRequest('test:contested.png', 'alice');
+        $response = $this->lockRequest('test:contested.png', 'bob');
+
+        $data = json_decode($response->getContent(), true);
+        $this->assertSame('alice', $data['locked_by'], 'the warning must name who holds it');
+        $this->assertIsInt($data['since'], 'and say how long ago, in seconds since epoch');
+        $this->assertLessThanOrEqual(time(), $data['since']);
+
+        // "Whatever the user answers, the editor opens": a lock is informational,
+        // never a gate, so bob's request must still have taken the lock.
+        $this->assertFileExists($this->lockFileFor('test:contested.png'));
+    }
+
+    public function testLockIsSharedBetweenPngAndSvgOfTheSameDiagram()
+    {
+        $this->lockRequest('test:shared.png', 'alice');
+        $response = $this->lockRequest('test:shared.svg', 'bob');
+
+        $data = json_decode($response->getContent(), true);
+        $this->assertSame('alice', $data['locked_by'],
+            'the .png and the .svg are the same diagram (see helper.php sourceID()) and must share one lock');
+    }
+
+    /**
+     * The shallow collision the maintainer's brief called out by name: a
+     * page 'ns:plan' and a diagram 'ns:plan.png' must not share a lock.
+     * Simulated with core's own lock() (the same call DokuWiki's edit form
+     * makes), not a fake - if the keys ever collided this would see
+     * 'pageeditor' come back as the diagram's holder.
+     */
+    public function testDiagramLockDoesNotCollideWithAPageLockOfTheSameBaseName()
+    {
+        $_SERVER['REMOTE_USER'] = 'pageeditor';
+        global $INPUT;
+        $INPUT = new \dokuwiki\Input\Input();
+        lock('test:collide');
+        unset($_SERVER['REMOTE_USER']);
+        $INPUT = new \dokuwiki\Input\Input();
+
+        $this->assertNotSame(
+            wikiLockFN('test:collide'),
+            $this->lockFileFor('test:collide.png'),
+            'sanity: the two ids must not hash to the same lock file'
+        );
+
+        $response = $this->lockRequest('test:collide.png', 'diagramuser');
+        $data = json_decode($response->getContent(), true);
+        $this->assertNull($data['locked_by'], 'the page lock must not leak into the diagram lock');
+    }
+
+    /**
+     * The deeper collision an arbiter review found: unlike the shallow case
+     * above, a page id CAN legally be spelled exactly like this diagram's
+     * unprefixed lock key ('test:collide2.drawio' is as valid a page id as
+     * any other - dots are only special at an id's boundaries). Without the
+     * 'drawio:' prefix in _lock_id() this page's lock and the diagram
+     * 'test:collide2.png''s lock would be the very same file.
+     */
+    public function testDiagramLockDoesNotCollideWithAPageLockSpelledLikeItsOwnUnprefixedKey()
+    {
+        $_SERVER['REMOTE_USER'] = 'pageeditor';
+        global $INPUT;
+        $INPUT = new \dokuwiki\Input\Input();
+        lock('test:collide2.drawio'); // a legal page id, not a diagram action
+        unset($_SERVER['REMOTE_USER']);
+        $INPUT = new \dokuwiki\Input\Input();
+
+        $this->assertNotSame(
+            wikiLockFN('test:collide2.drawio'),
+            $this->lockFileFor('test:collide2.png'),
+            'the prefix must separate these even though the page id equals the diagram\'s unprefixed key'
+        );
+
+        $response = $this->lockRequest('test:collide2.png', 'diagramuser');
+        $data = json_decode($response->getContent(), true);
+        $this->assertNull($data['locked_by'], "a page named exactly like the diagram's own lock key must not leak into it");
+    }
+
+    /**
+     * "An editor left open must keep its lock alive." draft_save is what
+     * autosave (and the editor's own 'save' event) already calls, so it
+     * renews the lock too - alongside, not instead of, script.js's own
+     * renewal interval (see script.js's close()) which is what actually
+     * covers "opened but not yet edited for a long time", since autosave
+     * only fires on a model change.
+     */
+    public function testDraftSaveRenewsAnExistingLock()
+    {
+        $this->lockRequest('test:renew.png', 'alice');
+        $lockFile = $this->lockFileFor('test:renew.png');
+        $this->assertFileExists($lockFile);
+
+        // back-date the lock as if it had been sitting untouched for a while
+        touch($lockFile, time() - 600);
+        clearstatcache();
+        $agedMtime = filemtime($lockFile);
+        $this->assertLessThanOrEqual(time() - 590, $agedMtime, 'sanity: touch() must have backdated the lock file');
+
+        $request = new TestRequest();
+        $request->setServer('REMOTE_USER', 'alice');
+        @$request->post(
+            [
+                'call' => 'plugin_drawio',
+                'action' => 'draft_save',
+                'imageName' => 'test:renew.png',
+                'content' => $this->draftJson(),
+                'sectok' => $this->validTokenFor('alice'),
+            ],
+            '/lib/exe/ajax.php'
+        );
+
+        clearstatcache();
+        $this->assertGreaterThan($agedMtime, filemtime($lockFile), 'autosave must refresh the lock, not just the draft');
+    }
+
+    /**
+     * Same permission model as every other action, checked the same way: a
+     * caller without AUTH_UPLOAD on the resolved id's namespace must be
+     * refused before any lock code runs at all - not told "denied" (that
+     * would itself be a tell), just refused, and refused with no side
+     * effect. An existence/permission oracle through a new endpoint is
+     * exactly the class of bug this development cycle already fixed once
+     * for rendering (see SECURITY.md, "Existence of protected media was
+     * observable") - this must not reopen it through the lock action.
+     */
+    public function testLockIsDeniedForANamespaceWithoutAccess()
+    {
+        $this->enableAcl(['secret:* @ALL 0'], 'mallory');
+
+        $response = $this->lockRequest('secret:diagram.png', 'mallory');
+
+        $this->assertFileDoesNotExist(
+            $this->lockFileFor('secret:diagram.png'),
+            'a denied caller must not be able to take a lock on something they cannot edit'
+        );
+        // No message body distinguishes "denied" from "does not exist" - see
+        // action.php's _ajax_call() doc comment; there is nothing else to
+        // assert on here without a live HTTP status (see the other 403 tests
+        // in this suite for why that can't be checked under the CLI SAPI).
+        $this->addToAssertionCount(1);
+    }
+
+    /**
+     * The response shape (and the side effect of taking the lock) must not
+     * depend on whether the file actually exists on disk - lock()/checklock()
+     * are pure id lookups, same as a page lock works for a page that has
+     * never been saved. A response that only appeared, or only carried
+     * 'since', for an existing file would be exactly the kind of oracle
+     * SECURITY.md already closed once for rendering.
+     */
+    public function testLockResponseShapeDoesNotDependOnFileExistence()
+    {
+        $existing = mediaFN('test:existsalready.png');
+        io_makeFileDir($existing);
+        file_put_contents($existing, $this->pngBytes());
+
+        $responseExisting = $this->lockRequest('test:existsalready.png', 'alice');
+        $responseMissing = $this->lockRequest('test:doesnotexist.png', 'alice');
+
+        $dataExisting = json_decode($responseExisting->getContent(), true);
+        $dataMissing = json_decode($responseMissing->getContent(), true);
+
+        $this->assertSame(array_keys($dataExisting), array_keys($dataMissing));
+        $this->assertNull($dataExisting['locked_by']);
+        $this->assertNull($dataMissing['locked_by']);
     }
 }

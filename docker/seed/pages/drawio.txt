@@ -194,3 +194,64 @@ then on both formats open from it, not from what used to be their own
 picture. There is no way for the plugin to detect this case (both are just
 image bytes); if a wiki has same-named diagrams like this, rename one of them
 before either is opened for editing again.
+
+===== 15. Two people editing the same diagram (advisory lock) =====
+
+Two tabs (or two people) editing the same diagram used to mean the second
+save silently won and the first person's work vanished, with no warning to
+either of them. This is now an advisory warning, not a hard lock - the same
+posture DokuWiki itself takes with pages: you are told someone else may be
+editing it, and you can carry on anyway. Nobody is ever locked out of their
+own diagram by a tab someone forgot to close.
+
+**How long a lock lasts, in plain words:** opening a diagram takes the lock
+and an open editor keeps renewing it (roughly every 5 minutes, by default,
+regardless of whether you have actually drawn anything - see below for why).
+**Closing the editor does not release it.** The lock simply expires on its
+own after the wiki's configured ''locktime'' (15 minutes by default) of no
+renewal. That means after you close an editor cleanly, someone else opening
+the same diagram can still be told "opened by you N minutes ago" for up to
+that long - a stale warning, not a wrong one; treat it as "recently", not
+"right now". This is a deliberate trade: the alternative (releasing the lock
+on close) let one tab silently delete a *different* tab's or a different
+person's still-active protection just by being closed, which is worse than
+an occasional stale warning for a warning nobody is blocked by.
+
+**To see a collision:**
+
+  - In one browser, log in as one user and open [[?do=media&ns=test|the media
+    manager]], select ''test:fresh_diagram.png'' and click **Edit with
+    draw.io** (or click the diagram in section 1 above). Leave the editor
+    open - do not draw anything yet.
+  - In a **second browser** (or a private/incognito window, so it is a
+    different login) as a **different user**, open the very same diagram.
+  - You must see a message naming the first user and roughly how long ago
+    they opened it, e.g. "This diagram was opened by alice 1 minute(s) ago
+    and may still be open there. Continue anyway?" - then the editor opens
+    regardless of what you do about the message. It is information, not a
+    lock: both users can draw and save; whoever saves last wins, same as
+    before this feature, just no longer a silent surprise. Note this works
+    even though the first user has not drawn anything yet - the lock is kept
+    alive by the open editor itself, not by editing.
+  - Reopening the **same** diagram yourself, in a second tab as the **same**
+    logged-in user, must **not** warn.
+
+**To see the lock expire on its own:** close the first editor (or just leave
+it idle), then wait past the wiki's configured ''locktime'' (15 minutes by
+default) before opening the diagram as the second user. The warning must be
+gone by then. Waiting the *first* user's session out while their tab is still
+open should not happen in practice - the open editor renews the lock every
+few minutes on its own, well inside ''locktime'' - but closing it is what
+starts the countdown, per the paragraph above.
+
+**A diagram's two renderings share one lock:** open ''test:plan.png'' as one
+user, then ''test:plan.svg'' as another (see section 14 above for why these
+are the same diagram) - the second user must be warned about the first, even
+though the filename extension differs. Closing either tab must not affect the
+other's protection.
+
+Anonymous editing: on a wiki that allows edits without logging in, this reuses
+exactly the identity DokuWiki's own page lock uses for an anonymous editor -
+IP address plus browser session - so two different anonymous visitors are
+correctly treated as different people (and warn each other), while two tabs
+of the very same anonymous visitor's own session do not warn each other.
