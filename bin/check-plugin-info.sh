@@ -5,8 +5,8 @@
 #
 # With --warn a stale date is reported but does not fail: bumping the date is a
 # release act, so every feature branch would otherwise have to touch the same
-# line and conflict with its siblings. CI is strict on master, which is the
-# branch a release is cut from.
+# line and conflict with its siblings. Only the release workflow runs it
+# strictly - right after bumping the date itself, just before tagging.
 set -eu
 
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
