@@ -1659,4 +1659,200 @@ class action_plugin_drawio_test extends DokuWikiTest
         $data = $this->fireIndexerPageAdd('idxpage6', ['test:idx6.png']);
         $this->assertSame('', trim($data['body']));
     }
+
+    // --- reindexing the page(s) that embed a diagram whose source changed ---
+    //
+    // The bug this task exists to fix: _index_diagrams() above only ever
+    // *supplies* text to an indexing pass that some other event already
+    // triggered - it never triggers one itself. Saving a diagram writes
+    // media files only, never a page, so nothing DokuWiki does on its own
+    // ever reindexes the page that embeds it. A freshly drawn diagram's
+    // words were therefore never searchable until someone forced a manual
+    // reindex - exactly what the maintainer found live.
+
+    /**
+     * Reproduces the maintainer's live finding as a unit test. Failed before
+     * the fix (confirmed by running it against the pre-fix action.php): the
+     * page is indexed - with nothing to extract, since the diagram has no
+     * source yet, exactly like testIndexerIgnoresADiagramWithoutASource
+     * above - and then never touched again. Saving the diagram through the
+     * same ajax endpoint script.js uses does not, on its own, make the
+     * embedding page findable by a word that exists only inside the
+     * diagram. No manual reindex step appears anywhere in this test - that
+     * absence is the point.
+     */
+    public function testSavingADiagramMakesTheEmbeddingPageFindableBySearch()
+    {
+        // Real-world order: the page is written and indexed long before
+        // anyone ever opens its diagram in the editor.
+        saveWikiText('reindexpage', '{{drawio>test:reindexed.png}}', 'test init');
+        idx_addPage('reindexpage', false, true);
+
+        // Sanity: nothing to find yet - see testIndexerIgnoresADiagramWithoutASource.
+        $words = ['bytecodecompiler'];
+        $before = idx_lookup($words);
+        $this->assertArrayNotHasKey(
+            'reindexpage',
+            $before['bytecodecompiler'] ?? [],
+            'sanity: the diagram has no source yet, so there is nothing to find'
+        );
+
+        // Now the diagram is actually saved, through the same ajax endpoint
+        // script.js uses, with a source containing a word that exists only
+        // inside the diagram.
+        $xml = '<mxfile><diagram><mxGraphModel><root>'
+            . '<mxCell value="BytecodeCompiler" vertex="1"/>'
+            . '</root></mxGraphModel></diagram></mxfile>';
+        $this->saveViaAjax('test:reindexed.png', $this->pngBytes(), $xml);
+
+        $words = ['bytecodecompiler'];
+        $after = idx_lookup($words);
+        $this->assertArrayHasKey(
+            'reindexpage',
+            $after['bytecodecompiler'] ?? [],
+            'saving the diagram must reindex the page that embeds it, with no manual reindex step'
+        );
+    }
+
+    // --- the media manager button on the source itself, not just its rendering ---
+    //
+    // A diagram is stored as a png/svg *and* its .drawio source; the media
+    // manager's "Edit with draw.io" button used to offer nothing when the
+    // .drawio itself was selected, even though it is the more important half
+    // of the pair. script.js's edit() resolves a .drawio click to a
+    // rendering id through this action before opening the editor - see its
+    // own docblock in action.php.
+
+    protected function resolveSourceViaAjax($mediaId, $server = [])
+    {
+        $post = ['action' => 'resolve_source', 'imageName' => $mediaId];
+        if ($server) $post['sectok'] = $this->validTokenFor(reset($server));
+        return $this->ajaxPost($post, $server);
+    }
+
+    /**
+     * Both renderings exist: png wins, deterministically - not "whichever
+     * happens to be newer" or any other tiebreak, so opening the same source
+     * twice in a row always lands on the same rendering. See helper::
+     * renderingCandidates()'s docblock for why png specifically.
+     */
+    public function testResolveSourcePrefersPngWhenBothRenderingsExist()
+    {
+        $this->put('test:both.png', $this->pngBytes());
+        $this->put('test:both.svg', $this->svgBytes());
+        $this->put('test:both.drawio', $this->diagramXml());
+
+        $data = json_decode($this->resolveSourceViaAjax('test:both.drawio')->getContent(), true);
+
+        $this->assertSame('test:both.png', $data['id']);
+        $this->assertTrue($data['granted']);
+    }
+
+    /** Only the svg rendering exists - that is the one to open, not the fixed default. */
+    public function testResolveSourceResolvesToTheExistingSvgRendering()
+    {
+        $this->put('test:onlysvg.svg', $this->svgBytes());
+        $this->put('test:onlysvg.drawio', $this->diagramXml());
+
+        $data = json_decode($this->resolveSourceViaAjax('test:onlysvg.drawio')->getContent(), true);
+
+        $this->assertSame('test:onlysvg.svg', $data['id']);
+    }
+
+    /**
+     * Neither rendering exists yet - the pair can be broken by deleting one
+     * side, or the bulk-conversion admin task can create a source for a
+     * diagram whose image was itself later removed. The sensible outcome:
+     * still resolve to *something* openable (the fixed png default, same as
+     * everywhere else in this plugin), so the editor opens on the source XML
+     * and the very next save is what actually creates that rendering - see
+     * testGetPngFallsBackToTheSourceWhenNoRenderingExistsYet() below for
+     * confirmation that the open half of that actually works, not just this
+     * resolution step.
+     */
+    public function testResolveSourceDefaultsToPngWhenNeitherRenderingExists()
+    {
+        $this->put('test:neither.drawio', $this->diagramXml());
+
+        $data = json_decode($this->resolveSourceViaAjax('test:neither.drawio')->getContent(), true);
+
+        $this->assertSame('test:neither.png', $data['id']);
+        $this->assertTrue($data['granted'], 'AUTH_UPLOAD is enough to create the new rendering the next save writes');
+    }
+
+    /** Not a .drawio id at all - script.js never sends one, but a malformed request must not crash. */
+    public function testResolveSourceRejectsANonDrawioId()
+    {
+        $this->ajaxPost(['action' => 'resolve_source', 'imageName' => 'test:notasource.png']);
+        // No JSON body/exception is the assertion here, same shape as every
+        // other 400 in this suite - see testOverwritingRequiresMoreThanUpload...
+        // for why the actual HTTP status can't be read under the CLI SAPI.
+        $this->addToAssertionCount(1);
+    }
+
+    /**
+     * The security constraint this whole action exists to respect: a caller
+     * without rights in the resolved id's namespace must learn nothing -
+     * not which rendering exists, not whether the source exists at all.
+     * SECURITY.md already closed this exact class of bug once ("Existence of
+     * protected media was observable"); a "which rendering does this source
+     * have" lookup is exactly that shape again if it is not gated the same
+     * way as everything else here.
+     */
+    public function testResolveSourceIsDeniedForANamespaceWithoutAccess()
+    {
+        $this->enableAcl(['secret:* @ALL 0'], 'mallory');
+        // both renderings exist - if the check were skipped, the response
+        // would differ from the "neither exists" case below and that
+        // difference alone would be the leak.
+        $this->put('secret:hidden.png', $this->pngBytes());
+        $this->put('secret:hidden.svg', $this->svgBytes());
+        $this->put('secret:hidden.drawio', $this->diagramXml());
+
+        $response = $this->resolveSourceViaAjax('secret:hidden.drawio', ['REMOTE_USER' => 'mallory']);
+
+        // Same as every other denied action in this suite: no JSON body was
+        // ever produced (the handler returns before echoing anything), so
+        // there is nothing for a denied caller to read either way - verified
+        // live below (a real HTTP 403) since TestRequest can't observe it.
+        $this->assertSame('', $response->getContent());
+    }
+
+    /**
+     * The other half of "identical whether missing or forbidden": a denied
+     * caller gets the exact same empty response for a source that does not
+     * exist at all as for one that exists but is hidden from them.
+     */
+    public function testResolveSourceResponseIsIdenticalForMissingAndForbidden()
+    {
+        $this->enableAcl(['secret:* @ALL 0'], 'mallory');
+        $this->put('secret:real.png', $this->pngBytes());
+        $this->put('secret:real.drawio', $this->diagramXml());
+
+        $forbidden = $this->resolveSourceViaAjax('secret:real.drawio', ['REMOTE_USER' => 'mallory']);
+        $missing = $this->resolveSourceViaAjax('secret:doesnotexist.drawio', ['REMOTE_USER' => 'mallory']);
+
+        $this->assertSame($forbidden->getContent(), $missing->getContent());
+    }
+
+    /**
+     * The other end of the "neither rendering exists" case above: the
+     * editor must actually be able to open from the source once
+     * 'resolve_source' has pointed script.js at a rendering id that has
+     * never been saved. Before this fix, get_png/get_svg bailed out the
+     * moment the image file itself didn't exist, discarding a source that
+     * was sitting right there - opening a diagram that way silently lost
+     * its content and started the user from a blank canvas instead.
+     */
+    public function testGetPngFallsBackToTheSourceWhenNoRenderingExistsYet()
+    {
+        $xml = $this->diagramXml('sourceonly');
+        $this->put('test:sourceonly.drawio', $xml);
+        $this->assertFileDoesNotExist(mediaFN('test:sourceonly.png'));
+
+        $data = $this->openViaAjax('test:sourceonly.png', 'get_png');
+
+        $this->assertSame($xml, $data['xml']);
+        $this->assertArrayNotHasKey('content', $data, 'there is no image to send - only the source exists');
+    }
 }

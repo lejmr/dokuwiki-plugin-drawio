@@ -292,6 +292,33 @@ class helper_plugin_drawio_test extends DokuWikiTest
         $this->assertSame('', $this->helper->otherRenderingID(''));
     }
 
+    // --- renderingCandidates() -------------------------------------------
+    //
+    // The reverse of sourceID(): given a .drawio source, which rendering
+    // ids it could belong to - used by action.php's 'resolve_source' action
+    // to open the right diagram when the media manager's "Edit with
+    // draw.io" button is clicked on the source itself, not a rendering.
+
+    public function testRenderingCandidatesListsPngBeforeSvg()
+    {
+        $this->assertSame(
+            ['ns:plan.png', 'ns:plan.svg'],
+            $this->helper->renderingCandidates('ns:plan.drawio')
+        );
+        $this->assertSame(
+            ['a:b:c.png', 'a:b:c.svg'],
+            $this->helper->renderingCandidates('a:b:c.DRAWIO')
+        );
+    }
+
+    public function testRenderingCandidatesRefusesEverythingElse()
+    {
+        $this->assertSame([], $this->helper->renderingCandidates('ns:plan.png'));
+        $this->assertSame([], $this->helper->renderingCandidates('ns:plan.svg'));
+        $this->assertSame([], $this->helper->renderingCandidates('ns:plan'));
+        $this->assertSame([], $this->helper->renderingCandidates(''));
+    }
+
     // --- diagramIndexText() --------------------------------------------
     //
     // The text the search index gets out of a diagram's stored XML. draw.io

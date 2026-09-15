@@ -796,3 +796,66 @@ console.log('OK: a missing ui config falls back to atlas');
 }
 
 console.log('OK: dark=auto is always requested so dark-capable themes follow the OS preference');
+
+// --- media manager: clicking the diagram's source (.drawio) opens it too ---
+//
+// The media manager button used to only ever appear for a rendering
+// (ns:plan.png/.svg) - selecting the source itself, the more important half
+// of the pair, offered nothing. edit() now recognises a .drawio id and asks
+// the server ('resolve_source') which rendering it belongs to before doing
+// anything else; every action after that point (lock/get_png/get_svg/save/
+// draft_*) still only ever sees a png/svg id, exactly as before.
+{
+    const { sandbox, postCalls, messageListeners, iframes } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit(makeImage('probe:plan.drawio'));
+
+    const resolveCall = postCalls.find((c) => c.data && c.data.action === 'resolve_source');
+    assert.ok(resolveCall, 'a .drawio click must ask the server which rendering it belongs to');
+    assert.strictEqual(resolveCall.data.imageName, 'probe:plan.drawio');
+    assert.strictEqual(
+        postCalls.some((c) => c.data && c.data.action === 'get_auth'),
+        false,
+        'resolve_source already answers what get_auth would - a .drawio click must not also call get_auth'
+    );
+
+    resolveCall.successCb({ granted: true, id: 'probe:plan.png' });
+
+    assert.strictEqual(
+        sandbox.currentDiagramId,
+        'probe:plan.png',
+        'the editor must open on the resolved rendering id, not the .drawio id'
+    );
+
+    // edit_cb() only asks for the diagram's content once the editor iframe
+    // itself reports it is ready - drive that the same way every other test
+    // in this file does.
+    const receive = messageListeners[messageListeners.length - 1];
+    const source = iframes[iframes.length - 1].contentWindow;
+    receive({ source, data: JSON.stringify({ event: 'init' }) });
+
+    const getPngCall = postCalls.find((c) => c.data && c.data.action === 'get_png');
+    assert.ok(getPngCall, 'the resolved id must drive the ordinary png open path, exactly as a direct .png click would');
+    assert.strictEqual(getPngCall.data.imageName, 'probe:plan.png');
+}
+
+console.log('OK: clicking a diagram\'s source (.drawio) resolves to its rendering before opening');
+
+// A denied resolve_source (same shape a denied get_auth already used) must not open the editor.
+{
+    const { sandbox, postCalls } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit(makeImage('secret:hidden.drawio'));
+    const resolveCall = postCalls.find((c) => c.data && c.data.action === 'resolve_source');
+
+    resolveCall.successCb({ granted: false, id: 'secret:hidden.png' });
+    assert.strictEqual(sandbox.editorOpen, false, 'a denied resolve_source must not open the editor');
+
+    // and a request that fails outright (expired sectok, network hiccup)
+    // must stay just as quiet as get_auth's does - see that test above
+    assert.strictEqual(resolveCall.failCb, null, 'resolve_source must be posted silently: true');
+}
+
+console.log('OK: a denied (or failed) resolve_source does not open the editor, silently, like get_auth');

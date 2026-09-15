@@ -11,6 +11,12 @@
  
     class action_plugin_drawio extends DokuWiki_Action_Plugin {
 
+        // How many pages one diagram save reindexes synchronously - see
+        // _reindex_diagram_pages()'s own docblock for the cost reasoning.
+        // A property (not a constant) so a test can shrink it without
+        // needing dozens of real pages to prove the cap works.
+        protected $reindexPageCap = 50;
+
         public function register(Doku_Event_Handler $controller) {
             $controller->register_hook('DOKUWIKI_STARTED', 'AFTER', $this, 'addjsinfo');
             // lib/exe/mediamanager.php never fires DOKUWIKI_STARTED, so without this
@@ -66,6 +72,8 @@
                 'zIndex' => $this->getConf('zIndex'),
                 'url' => $this->getConf('url'),
                 'toolbar_possible_extension' => array_map('trim', explode(",",$this->getConf('toolbar_possible_extension'))),
+                // which draw.io interface the editor opens with (conf/default.php)
+                'ui' => $this->getConf('ui'),
                 // lang strings for the JS-only media manager button - plugins have no
                 // core mechanism to add entries to the global JS LANG object, so this
                 // (JSINFO) is the established way to hand a plugin's own translated
@@ -586,6 +594,20 @@
 					if ($this->_write_file($src_fl, $xml)) {
 						$src_data = [basename($src_fl), $src_fl, $src_id, 'application/xml', $src_overwrite, null];
 						\dokuwiki\Extension\Event::createAndTrigger('MEDIA_UPLOAD_FINISH', $src_data, null, false);
+
+						// The whole point of _index_diagrams() (below) is
+						// undone if nothing ever reindexes the page after
+						// this point - see _reindex_diagram_pages()'s own
+						// docblock. Never lets a reindexing problem turn a
+						// successful diagram save into a failed request: the
+						// diagram is the user's work and it is already
+						// safely on disk by this line; the index is a
+						// convenience on top of it, not the other way round.
+						try {
+							$this->_reindex_diagram_pages($media_id);
+						} catch (\Throwable $e) {
+							// best effort - see comment above
+						}
 					}
 				}
             }
@@ -636,20 +658,99 @@
                 return;
             }
 
+            /**
+             * Which rendering a click on the *source* (ns:plan.drawio)
+             * itself should open - see script.js's edit(), which calls this
+             * instead of 'get_auth' when the media manager selection is a
+             * .drawio and then re-enters the ordinary png/svg open flow with
+             * whatever id this returns. Every other action here only ever
+             * receives a png/svg id (script.js derives it once, here, and
+             * reuses it); this is the one place a .drawio id is accepted at
+             * all.
+             *
+             * Existing rendering wins over the fixed default, and png wins
+             * over svg when *both* renderings exist: helper::
+             * renderingCandidates() already puts png first for exactly that
+             * default (see its own docblock), so "prefer whichever exists,
+             * falling back to that order" is one loop, not a second rule.
+             * Neither existing is the ordinary case for a diagram created by
+             * the bulk-conversion admin task straight from an old xmlpng-
+             * only image with no separate .drawio before it, or for a pair
+             * broken by deleting one rendering by hand - the fallback default
+             * (png) opens the editor on the source XML with no image loaded,
+             * and the *next* save is what actually creates that rendering,
+             * exactly as it already does for a brand new diagram.
+             *
+             * Security: this asks nothing that 'get_auth' does not already
+             * ask, on the same acl_path (mediaAclPath() is namespace-only -
+             * it does not care whether $media_id ends in .drawio, .png or
+             * .svg, so the ACL check above already answered this exact
+             * question). $access_granted already gated everything above this
+             * point, so a caller without it never reaches here - same 403,
+             * same lack of a body, whether test:secret.drawio does not exist
+             * or the caller simply may not see test:secret:* at all. And
+             * telling an *allowed* caller which of their own two renderings
+             * exists reveals nothing they could not already see by listing
+             * the same namespace in the media manager themselves.
+             */
+            if ($action == 'resolve_source') {
+                $candidates = $helper ? $helper->renderingCandidates($media_id) : [];
+                if (empty($candidates)) {
+                    // not a .drawio id at all - script.js never sends one,
+                    // same class of malformed request as everywhere else here
+                    http_status(400);
+                    return;
+                }
+                $resolved = $candidates[0];
+                foreach ($candidates as $candidate) {
+                    if (file_exists(mediaFN($candidate))) {
+                        $resolved = $candidate;
+                        break;
+                    }
+                }
+                // Same formula $overwrite_granted used above, recomputed
+                // against the *resolved* rendering rather than the .drawio
+                // id itself - $auth/$auth_ow are unaffected by that (the ACL
+                // path is namespace-only, see this action's own comment),
+                // only which file the overwrite bar applies to changes: a
+                // diagram whose rendering does not exist yet is a *create*,
+                // needing only AUTH_UPLOAD, not the higher overwrite bar a
+                // pre-existing .drawio id would otherwise have implied.
+                $resolved_overwrite_granted = $access_granted
+                    && (!file_exists(mediaFN($resolved)) || $auth >= $auth_ow);
+                header('Content-Type: application/json');
+                echo json_encode(['granted' => $resolved_overwrite_granted, 'id' => $resolved]);
+                return;
+            }
+
             if($action == 'get_png' || $action == 'get_svg'){
-				if (!file_exists($fl)) return;
-                // Return image in the base64 for draw.io
-                header('Content-Type: application/json');				
-                $fc = file_get_contents($fl);
-				$mime = $action == 'get_png' ? 'image/png' : 'image/svg+xml';
-				$out = ["content" => "data:$mime;base64,".base64_encode($fc)];
 				// The XML source, when there is one. script.js loads the
 				// editor straight from this and never touches the image;
 				// without it, it falls back to xmlpng/xmlsvg exactly as
 				// before, which is what keeps every existing diagram working.
 				// Same file, same namespace, so the ACL checked above is the
 				// one that governs it - nothing extra to check here.
+				//
+				// Fetched before the file_exists($fl) bailout below: a source
+				// clicked through the media manager (see 'resolve_source')
+				// can resolve to a rendering id that has never been saved at
+				// all - neither png nor svg exists yet, only the .drawio -
+				// and that diagram must still open, from its source, exactly
+				// as the save path already creates the rendering the first
+				// time it is saved. Bailing out here before checking for a
+				// source would instead hand script.js an empty body and open
+				// a blank diagram, discarding a source that is sitting right
+				// there.
 				$xml = $this->_source_xml($media_id, $fl);
+				if (!file_exists($fl) && $xml === '') return;
+                // Return image in the base64 for draw.io
+                header('Content-Type: application/json');
+				$out = [];
+				if (file_exists($fl)) {
+					$fc = file_get_contents($fl);
+					$mime = $action == 'get_png' ? 'image/png' : 'image/svg+xml';
+					$out['content'] = "data:$mime;base64,".base64_encode($fc);
+				}
 				if ($xml !== '') $out['xml'] = $xml;
 				echo json_encode($out);
             }
@@ -865,6 +966,93 @@
             list(, $mime) = mimetype($dst_source_id);
             $data = [basename($dst_source_fl), $dst_source_fl, $dst_source_id, $mime, false, null];
             \dokuwiki\Extension\Event::createAndTrigger('MEDIA_UPLOAD_FINISH', $data, null, false);
+        }
+
+        /**
+         * Reindex every page that embeds a diagram whose source was just
+         * (over)written, so a word that exists only inside the diagram
+         * becomes searchable without anyone running a manual reindex.
+         *
+         * The defect this exists to fix: _index_diagrams() below only ever
+         * *supplies* text to whatever indexing pass core happens to run for
+         * a page - it never triggers one. Saving a diagram writes media
+         * files only, never touches a page, so nothing ever reindexed the
+         * page embedding it. Verified live before this fix existed: a page
+         * whose diagram had a readable, anonymously-accessible source with
+         * extractable text still did not turn up in search until the page
+         * was reindexed by hand.
+         *
+         * Which pages: helper::pagesUsing() answers from the metadata
+         * index (relation_media), not a live parse of every page's wiki
+         * text - see its own docblock for what that means for a page that
+         * was never indexed at all. Checked against $media_id (the
+         * rendering just saved) and its sibling rendering (see
+         * helper::otherRenderingID()) together, because a page can embed
+         * either the .png or the .svg of the very same diagram (see
+         * helper.php's sourceID()) and both read the source that was just
+         * written.
+         *
+         * Cost: bounded to $reindexPageCap pages, one idx_addPage() call
+         * each, run synchronously inside this ajax request - the same
+         * request a user is waiting on to know their diagram saved. A
+         * diagram embedded on a handful of pages (the overwhelmingly common
+         * case for a plugin whose own README describes single-diagram-per-
+         * page usage) costs a handful of reindexes, comparable to what an
+         * ordinary page edit already pays every time core reindexes that
+         * page's own content. A diagram embedded on hundreds of pages is
+         * not the common case this plugin was built around, and reindexing
+         * hundreds of pages synchronously inside one save request would
+         * turn an ordinary diagram edit into a multi-second (or, on a large
+         * wiki, timed-out) request - worse than a slightly stale index. The
+         * cap chooses "stay stale a little longer" over "the save itself
+         * gets slow or fails": pages beyond it simply keep whatever the
+         * index already had until the next natural trigger (any edit to
+         * the page itself, or a maintainer running the bulk-conversion
+         * admin task, which reindexes with no such cap - see admin.php's
+         * _reindexConverted()) catches them up. This never worked at all
+         * before this fix, so "eventually, for most wikis" is strictly
+         * better than the status quo, not a regression against one.
+         *
+         * ponytail: a fixed cap and no queue, the same shape admin.php's
+         * $batchSize already uses for the same reason - this plugin has no
+         * background job runner anywhere else, and building one for this
+         * alone is more machinery than a save-time convenience is worth.
+         * Revisit (a real ceiling, not a guess) if a wiki with a diagram
+         * shared across hundreds of pages actually shows up.
+         *
+         * Failure: every idx_addPage() call is individually wrapped so one
+         * broken page's reindex cannot stop the rest, and the caller wraps
+         * this whole method in its own try/catch so nothing in here can
+         * turn a successful diagram save into a failed request - the
+         * diagram is already safely written to disk by the time this runs.
+         *
+         * @param string $media_id the rendering id that was just saved (e.g. 'ns:plan.png')
+         */
+        private function _reindex_diagram_pages($media_id) {
+            $helper = plugin_load('helper', 'drawio');
+            if (!$helper) return;
+
+            $ids = [$media_id];
+            $other = $helper->otherRenderingID($media_id);
+            if ($other !== '') $ids[] = $other;
+
+            $pages = [];
+            foreach ($ids as $id) {
+                foreach ($helper->pagesUsing($id) as $page) {
+                    $pages[$page] = true;
+                }
+            }
+            if (!$pages) return;
+
+            $n = 0;
+            foreach (array_keys($pages) as $page) {
+                if (++$n > $this->reindexPageCap) break;
+                try {
+                    idx_addPage($page, false, true);
+                } catch (\Throwable $e) {
+                    // one page's reindex failing must not stop the rest
+                }
+            }
         }
 
         /**

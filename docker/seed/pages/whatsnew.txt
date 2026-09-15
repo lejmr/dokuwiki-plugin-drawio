@@ -1,0 +1,96 @@
+====== What is new — a walk-through ======
+
+This page only covers what changed in this round. The full regression protocol
+is on [[drawio|the drawio page]].
+
+Log in as **admin / admin**.
+
+===== 1. A diagram now keeps its source =====
+
+Until now a diagram's draw.io XML lived **inside** the image. Any tool that
+rewrote that image destroyed it and the diagram became a flat picture nobody
+could edit again.
+
+  - Click the placeholder below, draw a box or two, **Save**, close the editor.
+  - Open the [[?do=media&ns=new|media manager]] and look in the ''new'' namespace.
+    You should see **two** files: ''plan.png'' and ''plan.drawio''.
+  - Click the diagram again: it opens **from the source**, not from the image.
+
+{{drawio>new:plan}}
+
+===== 2. An old diagram gains a source when you save it =====
+
+''wiki:sample.png'' was planted here the old way: XML embedded in the image,
+no source file. This is what every diagram on a real wiki looks like today.
+
+  - Click it, change something, save.
+  - In the media manager, ''wiki:sample.drawio'' has appeared next to it.
+
+{{drawio>wiki:sample.png}}
+
+===== 3. Or convert everything at once =====
+
+  - **Admin → Draw.io: convert old diagrams**.
+  - It scans first and shows you what it found. Nothing is written yet.
+  - Press convert. It never overwrites a source that already exists, and it
+    never touches your images.
+
+===== 4. Diagram text is searchable =====
+
+The text inside a diagram used to be invisible to search.
+
+  - Search for a word that only exists **inside** a diagram (see the note the
+    coordinator left you for which word to try).
+  - The page holding that diagram should come up.
+  - A diagram in a namespace you may not read is never indexed — its text
+    cannot leak through search.
+
+===== 5. Two people editing one diagram =====
+
+  - Open ''new:plan'' above and leave the editor open.
+  - In a private/incognito window, open this page and click the same diagram.
+  - You are told who has it open and how long ago — and you can continue anyway.
+    The warning informs, it never blocks.
+
+===== 6. The source follows its image =====
+
+  - In the media manager, **rename** ''new:plan.png''. ''plan.drawio'' moves with it.
+  - **Delete** a diagram. Its source goes too — no orphans left behind.
+    (DokuWiki keeps deleted media in the attic, so this is recoverable.)
+
+===== 7. Sized diagrams download a smaller image =====
+
+The one below is served resized by the server, not shrunk with CSS in your
+browser. Open it in a new tab and compare its size with the full one in
+section 1.
+
+{{drawio>new:plan?200}}
+
+===== 8. The editor's interface is configurable =====
+
+  - **Admin → Configuration Settings → drawio**.
+  - ''ui'' — pick ''sketch'' or ''min'' and reopen a diagram. The editor looks
+    different.
+  - ''toolbar_possible_extension'' is now a pair of checkboxes rather than a
+    free-text list.
+
+===== 9. Edit from the media manager =====
+
+A diagram no page references used to be uneditable — nothing could open it.
+The button now works on **either half of the pair**, not just the rendering.
+
+  - Media manager → pick ''new:plan.png'' → **Edit with draw.io** in the file
+    details, next to Delete and Upload new version.
+  - Now pick ''new:plan.drawio'' instead — the same button is there too, and
+    opens the very same diagram, not a blank one.
+  - Delete ''new:plan.png'' (keep ''new:plan.drawio''), then select the
+    ''.drawio'' again and click **Edit with draw.io**. It still opens, loaded
+    from the source with no image to show yet — save it and ''new:plan.png''
+    reappears.
+
+===== 10. ODT export =====
+
+  - [[?do=export_odt&id=whatsnew|Export this page to ODT]] and open it.
+    The diagrams are in the document.
+  - A diagram you may not read is never embedded in an export — that was a real
+    hole, found and closed in the audit.
