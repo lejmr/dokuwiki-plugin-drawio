@@ -20,11 +20,21 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
+      # A release is cut from master, so the date is enforced there and only
+      # reported on branches - otherwise every branch has to touch the same line.
+      - name: plugin.info.txt (master)
+        if: github.ref_name == 'master'
+        run: bin/check-plugin-info.sh
       - name: plugin.info.txt
-        # strict on master (that is where a release is cut), advisory on branches
-        run: bin/check-plugin-info.sh ${{ github.ref_name == 'master' && ' ' || '--warn' }}
+        if: github.ref_name != 'master'
+        run: bin/check-plugin-info.sh --warn
       - name: php -l
         run: find . -name '*.php' -not -path './.cache/*' -print0 | xargs -0 -n1 php -l
+      - name: javascript
+        # node ships on the runner; script.js is plain browser JS, no build step
+        run: |
+          node --check script.js
+          node _test/script.test.js
 
   tests:
     name: tests (DokuWiki ${{ matrix.dokuwiki }})

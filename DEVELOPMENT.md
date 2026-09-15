@@ -32,6 +32,12 @@ real DokuWiki checkout (cached in `.cache/`, safe to delete).
 
 `bin/run-tests.sh` is the same thing without docker and is what CI runs.
 
+The JavaScript side has its own check, which needs nothing but node:
+
+```sh
+node _test/script.test.js
+```
+
 ## Before releasing
 
 ```sh
@@ -44,6 +50,6 @@ A stale date in `plugin.info.txt` means installed wikis never see the update
 
 ## CI
 
-`.github/workflows/ci.yml` runs the metadata check, `php -l`, and the test suite
-against **master, stable and oldstable** on every push and once a week - the
+`.github/workflows/ci.yml` runs the metadata check, `php -l`, the JavaScript
+check, and the PHP test suite against **master, stable and oldstable** on every push and once a week - the
 weekly run is what catches a new DokuWiki release breaking the plugin.

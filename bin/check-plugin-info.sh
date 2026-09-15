@@ -27,7 +27,9 @@ date=$(value date)
 echo "$date" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' || { echo "FAIL date '$date' is not YYYY-MM-DD"; fail=1; }
 
 # Newest commit touching shipped plugin code (not tooling, tests or docs).
-code=$(git log -1 --format=%cs -- '*.php' '*.js' '*.css' \
+# %as is the AUTHOR date: rebasing rewrites committer dates, which would fail
+# this check on a branch that changed no code at all.
+code=$(git log -1 --format=%as -- '*.php' '*.js' '*.css' \
     ':(exclude)bin' ':(exclude)_test' ':(exclude)docker' ':(exclude).github' 2>/dev/null || true)
 
 if [ -n "$code" ] && [ "$date" \< "$code" ]; then
