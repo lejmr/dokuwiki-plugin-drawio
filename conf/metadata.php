@@ -34,3 +34,10 @@ $meta['toolbar_possible_extension'] = array(
 // parameters" docs) - a plain string setting would let an admin type
 // anything and get a silently broken editor instead of an error.
 $meta['ui'] = array('multichoice', '_choices' => array('kennedy', 'min', 'atlas', 'dark', 'sketch', 'simple'));
+// issue #62: a plain checkbox - onoff already stores/reads the 0/1 this
+// plugin's own getConf('edit_button') check treats as a bool.
+$meta['edit_button'] = array('onoff');
+// issue #50: pixel offset, so it must be a non-negative integer - anything
+// else (a unit suffix, a negative number) would silently break the iframe's
+// CSS in script.js rather than fail loudly here.
+$meta['top_offset'] = array('numeric', '_pattern' => '/^\d+$/');

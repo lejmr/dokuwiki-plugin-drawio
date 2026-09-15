@@ -298,19 +298,55 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         // placeholder for a missing diagram, same as core's own {{image.png}}
         // already does for any missing image in a PDF export. ODT above is
         // unaffected: it embeds bytes directly and always has its own gate.
+        // $DATE_AT ("view page at date", inc/actions.php's ACTION_SHOW): core's
+        // own {{image.png}} points at the media revision that was current at
+        // that date, not today's (Doku_Renderer_xhtml::_media(), via its
+        // _getLastMediaRevisionAt() helper and media_exists()'s own $rev/
+        // $date_at pair) - do the same here, the same way. $renderer->date_at
+        // is a public property on every Doku_Renderer, set by p_render()
+        // only when a date_at was actually requested, so it is '' for an
+        // ordinary view - $rev then stays '' and every URL below is exactly
+        // what it was before this existed. Only the URL changes; no
+        // server-side existence/ACL check is added, keeping the rule in the
+        // long comment above intact.
+        $rev = '';
+        if ($renderer->date_at) {
+            try {
+                $changelogRev = (new \dokuwiki\ChangeLog\MediaChangeLog($media_id))->getLastRevisionAt($renderer->date_at);
+                if ($changelogRev !== false) {
+                    $rev = $changelogRev;
+                }
+            } catch (\Throwable $e) {
+                // DokuWiki oldstable's ChangeLog::getRelativeRevision() throws
+                // "Cannot use bool as array" for a diagram with no changelog
+                // file at all (readloglines() returns false there, and it
+                // destructures that unconditionally) - a core bug, verified
+                // against oldstable's real inc/ChangeLog/ChangeLog.php.
+                // Falling back to "no matching revision" (leaving $rev '')
+                // is exactly the right outcome anyway for a diagram that has
+                // never been revised.
+            }
+        }
+        $revParam = $rev !== '' ? "&amp;rev=".$rev : '';
+
         if ($linkonly) {
             $text = $title !== null ? $title : $media_id;
-            $renderer->doc .= "<a href='".DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($media_id)."' id='".hsc($media_id)."'
+            $renderer->doc .= "<a href='".DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($media_id).$revParam."' id='".hsc($media_id)."'
                         class='drawio-linkonly' onclick='edit(this);return false;'>".hsc($text)."</a>";
             return true;
         }
 
-        $style = "max-width:100%;cursor:pointer;";
+        // issue #62: an empty diagram saved by draw.io is a valid, invisible
+        // 1x1px PNG - the browser loads it (no onerror), so there is nothing
+        // to click and the diagram can never be reopened. min-width/
+        // min-height give even a 1x1 image a clickable area, regardless of
+        // the edit_button setting below.
+        $style = "max-width:100%;min-width:24px;min-height:24px;cursor:pointer;";
         if ($width !== null) {
             $style .= "width:".$width."px;".($height !== null ? "height:".$height."px;" : "");
         }
         $alt = $title !== null ? $title : $media_id;
-        $src = DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($media_id);
+        $src = DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($media_id).$revParam;
         if ($width !== null) {
             // Ask fetch.php for a resized, server-cached copy instead of
             // downloading the full-size file and shrinking it with CSS -
@@ -351,6 +387,21 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
                         src='".$src."'
                         onerror=\"this.onerror=null;this.src='".$placeholder."';\"
                         alt='".hsc($alt)."'".($title !== null ? " title='".hsc($title)."'" : "")." />";
+
+        // issue #62: an explicit "Edit with draw.io" button under the image,
+        // for wikis that want a click target that stays clickable even for a
+        // diagram whose image happens to render as nothing at all (not just
+        // the 1x1px case above - a broken/oversized/off-canvas render too).
+        // Off by default (conf/default.php) to keep current behaviour
+        // unchanged; server-rendered like the image itself, so no ACL/
+        // existence check is added and the xhtml stays the same for every
+        // viewer, exactly like the image above.
+        if ($this->getConf('edit_button')) {
+            $renderer->doc .= "<button type='button' class='drawio-editbutton'
+                        style='display:block;margin:0.25em auto 0;font-size:85%;'
+                        data-image-id='".hsc($media_id)."' onclick='drawioEditButtonClick(this);'
+                        >".hsc($this->getLang('editbutton'))."</button>";
+        }
         return true;
     }
 }

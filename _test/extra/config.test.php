@@ -1,6 +1,7 @@
 <?php
 
 use dokuwiki\plugin\config\core\Setting\SettingMulticheckbox;
+use dokuwiki\plugin\config\core\Setting\SettingNumeric;
 
 /**
  * conf/metadata.php's toolbar_possible_extension setting must save cleanly.
@@ -110,5 +111,44 @@ class config_metadata_plugin_drawio_test extends DokuWikiTest
         $changed = $setting->update(['png', 'svg', 'other' => '']);
 
         $this->assertTrue($changed);
+    }
+
+    /** @return array top_offset's own params, exactly as conf/metadata.php declares them */
+    protected function topOffsetParams()
+    {
+        $meta = [];
+        include __DIR__ . '/../../conf/metadata.php';
+        $params = $meta['top_offset'];
+        array_shift($params);
+        return $params;
+    }
+
+    /**
+     * issue #50: a plain non-negative integer must be accepted - this is
+     * the only shape script.js's topOffset ever does anything sane with.
+     */
+    public function testTopOffsetAcceptsAPlainInteger()
+    {
+        $setting = new SettingNumeric('top_offset', $this->topOffsetParams());
+        $setting->initialize(0);
+
+        $changed = $setting->update('40');
+
+        $this->assertTrue($changed);
+    }
+
+    /**
+     * Anything that isn't a plain non-negative integer (a unit suffix, a
+     * negative number, arbitrary text) must be rejected rather than
+     * silently reaching script.js's iframe CSS as a broken value.
+     */
+    public function testTopOffsetRejectsANonIntegerValue()
+    {
+        $setting = new SettingNumeric('top_offset', $this->topOffsetParams());
+        $setting->initialize(0);
+
+        $this->assertFalse($setting->update('40px'), '"40px" must be rejected');
+        $this->assertFalse($setting->update('-40'), 'a negative offset must be rejected');
+        $this->assertFalse($setting->update('not-a-number'), 'arbitrary text must be rejected');
     }
 }

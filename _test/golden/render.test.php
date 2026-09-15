@@ -36,6 +36,22 @@ class syntax_plugin_drawio_golden_test extends DokuWikiTest
         return p_render('xhtml', p_get_instructions($text), $info);
     }
 
+    /**
+     * Same as render(), but as if the page were viewed at $dateAt - core's
+     * own $DATE_AT/"view page at date" ($conf['date_at_format'], inc/
+     * actions.php's ACTION_SHOW) - which p_render() only sets Doku_Renderer::
+     * $date_at from when its own 4th argument is given.
+     */
+    protected function renderAtDate($text, $dateAt, $id = 'start')
+    {
+        global $ID, $INPUT;
+        $ID = $id;
+        $_REQUEST['id'] = $id;
+        $INPUT = new \dokuwiki\Input\Input();
+
+        return p_render('xhtml', p_get_instructions($text), $info, $dateAt);
+    }
+
     protected function setConf($setting, $value)
     {
         global $conf;
@@ -69,6 +85,86 @@ class syntax_plugin_drawio_golden_test extends DokuWikiTest
         $html = $this->render('{{drawio>test:present}}');
 
         $this->assertStringContainsString("src='".DOKU_BASE."lib/exe/fetch.php?media=test:present.png'", $html);
+    }
+
+    /**
+     * issue #62: a diagram saved empty by draw.io is a valid, invisible
+     * 1x1px PNG - min-width/min-height give even that image a clickable
+     * area, unconditionally (edit_button off, the default, is exercised
+     * here since that is what every existing wiki already has).
+     */
+    public function testDiagramImageHasAMinimumClickableSize()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present}}');
+
+        $this->assertStringContainsString('min-width:24px', $html);
+        $this->assertStringContainsString('min-height:24px', $html);
+    }
+
+    /**
+     * issue #62: with edit_button on, an explicit "Edit with draw.io" button
+     * renders under the image - a click target that survives even a
+     * diagram whose rendering is otherwise unclickable.
+     */
+    public function testEditButtonRendersUnderTheImageWhenEnabled()
+    {
+        $this->setConf('edit_button', 1);
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present}}');
+
+        $this->assertStringContainsString('<button', $html);
+        $this->assertStringContainsString("data-image-id='test:present.png'", $html);
+        $this->assertStringContainsString('drawioEditButtonClick(this)', $html);
+        $this->assertStringContainsString('Edit with draw.io', $html);
+    }
+
+    /**
+     * Archives an old media revision the same two ways core itself keeps
+     * one: a copy of its bytes under media_attic/, and a line in its own
+     * .changes file (mediaMetaFN($id, '.changes')) - the one
+     * MediaChangeLog::getLastRevisionAt() actually reads. Deliberately not
+     * media_saveOldRevision(): its own getRevisionInfo() consistency check
+     * (comparing the live file's mtime against an empty changelog) treats a
+     * first-ever archive as "nothing to log" on some DokuWiki versions and
+     * skips writing the changelog line entirely - real diagrams never hit
+     * that gap because core's own upload path always logs *every* save, but
+     * a test faking one old revision by hand does. Writing both pieces
+     * directly is what a real second save actually leaves behind.
+     */
+    protected function archiveOldMediaRevision($mediaId, $bytes, $atTime)
+    {
+        global $INPUT;
+        $INPUT = new \dokuwiki\Input\Input(); // addMediaLogEntry() reads it
+
+        $atticFile = mediaFN($mediaId, $atTime);
+        io_makeFileDir($atticFile);
+        file_put_contents($atticFile, $bytes);
+        addMediaLogEntry($atTime, $mediaId, DOKU_CHANGE_TYPE_CREATE, '', '', null, strlen($bytes));
+    }
+
+    /**
+     * $DATE_AT ("view page at date"): a diagram embedded in a page viewed at
+     * an older revision must point at the media revision that was current
+     * at that date, exactly like core's own {{image.png}} already does -
+     * only the URL changes, no server-side existence check is added.
+     */
+    public function testDiagramAtAnOlderPageRevisionPointsAtTheMatchingMediaRevision()
+    {
+        $mediaId = 'test:revved.png';
+        $oldMtime = time() - 120;
+        $this->archiveOldMediaRevision($mediaId, 'first-version', $oldMtime);
+
+        // the "current" version, saved after the date we'll view at
+        $this->createMedia($mediaId, 'second-version');
+
+        $dateAt = time() - 60; // between the archived revision and now
+
+        $html = $this->renderAtDate('{{drawio>test:revved}}', $dateAt);
+
+        $this->assertStringContainsString('rev='.$oldMtime, $html);
     }
 
     public function testMissingDiagramFallsBackToPlaceholderOnErrorInTheBrowser()

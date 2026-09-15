@@ -746,3 +746,53 @@ console.log("OK: clicking the button on a .drawio source resolves to its renderi
 }
 
 console.log('OK: a full localStorage (QuotaExceededError) does not break save/autosave (#32/#57)');
+
+// --- issue #62: drawioEditButtonClick() edge cases -------------------------
+
+// A stale button (its image removed from the DOM between render and click,
+// or a broken data-image-id) must not throw - just do nothing, same as a
+// core control clicking on something already gone.
+{
+    const { sandbox, postCalls } = buildSandbox();
+    loadScript(sandbox);
+
+    const button = makeImage('nonexistent.png');
+    button.setAttribute('data-image-id', 'nonexistent.png');
+    sandbox.document.getElementById = () => null; // nothing found
+
+    assert.doesNotThrow(() => sandbox.drawioEditButtonClick(button));
+    assert.strictEqual(postCalls.length, 0, 'no image found must mean no ajax call at all');
+}
+
+console.log('OK: drawioEditButtonClick() on a button with no matching image does nothing (#62)');
+
+// --- issue #50: top_offset edge cases --------------------------------------
+
+// The default (0, or the key entirely missing on a page whose cached JSINFO
+// predates this setting) must leave the iframe exactly as it always was -
+// no top/height override at all, not just one computed to be a no-op.
+{
+    const { sandbox, iframes } = buildSandbox(); // topOffset absent from JSINFO
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('nooffset.png'));
+
+    const style = iframes[iframes.length - 1].getAttribute('style');
+    assert.ok(!style.includes('top:'), 'no configured top_offset must mean no top override: ' + style);
+    assert.ok(!style.includes('height:'), 'no configured top_offset must mean no height override: ' + style);
+}
+
+console.log('OK: a missing/zero top_offset leaves the iframe style unchanged (#50)');
+
+{
+    const { sandbox, iframes } = buildSandbox();
+    sandbox.JSINFO.plugin_drawio.topOffset = 0; // explicit zero, not just absent
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('zerooffset.png'));
+
+    const style = iframes[iframes.length - 1].getAttribute('style');
+    assert.ok(!style.includes('top:'), 'an explicit zero must mean no top override: ' + style);
+}
+
+console.log('OK: an explicit top_offset of 0 also leaves the iframe style unchanged (#50)');

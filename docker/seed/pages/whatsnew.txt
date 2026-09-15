@@ -121,3 +121,26 @@ The button now works on **either half of the pair**, not just the rendering.
     contain that diagram. That was a real hole, found and closed in the audit.
 
 {{drawio>secret:hidden.png}}
+
+===== 11. An empty diagram stays reachable (issue #62) =====
+
+draw.io itself, not this plugin, is what causes this one: saving a diagram
+with nothing drawn on it produces a valid PNG that is exactly 1 pixel by 1
+pixel. A browser loads that image fine - there is no error, so the old
+"onerror falls back to the placeholder" trick never fires - it is just
+completely invisible, and before this fix that meant nothing to click and no
+way back into the diagram, ever.
+
+  - Click the placeholder below to create a brand new diagram.
+  - In the draw.io editor, **without drawing anything**, save (the disk icon,
+    or Ctrl+S) and close the editor straight away.
+  - The diagram is now invisible. Every diagram image has a minimum
+    clickable size now, though - move your mouse around roughly where the
+    (invisible) picture should be; a small area right there is still
+    clickable and reopens the editor.
+  - For a fix you don't have to hunt for: **Admin → Configuration Settings →
+    drawio**, tick **edit_button**, save, then reload this page. An
+    "Edit with draw.io" button now appears under every diagram on the page,
+    this empty one included - click it to reopen the same diagram.
+
+{{drawio>new:empty_diagram}}
