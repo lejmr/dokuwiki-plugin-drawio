@@ -93,7 +93,8 @@ jobs:
       - name: javascript
         run: |
           node --check script.js
-          node _test/script.test.js
+          node _test/golden/script.test.js
+          node _test/extra/script.test.js
 
       # The same bin/run-tests.sh ci.yml's matrix calls, run in sequence
       # instead of as separate jobs: the commit below must not be pushed
