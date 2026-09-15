@@ -50,6 +50,34 @@ class helper_plugin_drawio_test extends DokuWikiTest
     }
 
     /**
+     * The single home for the ACL path governing a diagram's media file -
+     * syntax.php and action.php both call this now instead of each
+     * inlining ltrim(getNS($media_id) . ':*', ':') themselves.
+     */
+    public function testMediaAclPathIsTheNamespaceWildcard()
+    {
+        $this->assertSame('ns:*', $this->helper->mediaAclPath('ns:plan.png'));
+        $this->assertSame('a:b:*', $this->helper->mediaAclPath('a:b:c.svg'));
+        $this->assertSame('*', $this->helper->mediaAclPath('plan.png'));
+    }
+
+    /**
+     * This is the single home for "is this a diagram" - action.php's save
+     * gate now asks it directly instead of re-answering the question itself.
+     */
+    public function testIsDiagramExtension()
+    {
+        $this->assertTrue($this->helper->isDiagramExtension('ns:plan.png'));
+        $this->assertTrue($this->helper->isDiagramExtension('ns:plan.svg'));
+        $this->assertTrue($this->helper->isDiagramExtension('ns:plan.PNG'));
+        $this->assertTrue($this->helper->isDiagramExtension('ns:plan.SVG'));
+        $this->assertFalse($this->helper->isDiagramExtension('ns:plan.php'));
+        $this->assertFalse($this->helper->isDiagramExtension('ns:plan.drawio'));
+        $this->assertFalse($this->helper->isDiagramExtension('ns:plan'));
+        $this->assertFalse($this->helper->isDiagramExtension(''));
+    }
+
+    /**
      * Build a PNG carrying a draw.io tEXt chunk, the way the editor's xmlpng
      * export does: keyword "mxfile", value URL-encoded.
      */

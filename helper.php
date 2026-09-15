@@ -26,15 +26,55 @@ if (!defined('DOKU_INC')) die();
 class helper_plugin_drawio extends DokuWiki_Plugin
 {
     /**
+     * Whether $media_id's extension is one of the formats a diagram is
+     * rendered in.
+     *
+     * The single home for this question. It used to be answered three
+     * different ways in three places - a lowercased in_array() here, an
+     * un-lowercased one in action.php's save gate, and a regex in the draft
+     * gate - each carrying a comment telling the reader to keep the other
+     * two in step. A third rendering format now has to be added in exactly
+     * one place: here (and, separately, the draft gate's regex - see its own
+     * comment for why that one stays a regex).
+     *
+     * @param string $media_id
+     * @return bool
+     */
+    public function isDiagramExtension($media_id)
+    {
+        return in_array(strtolower(pathinfo($media_id, PATHINFO_EXTENSION)), ['png', 'svg'], true);
+    }
+
+    /**
+     * The ACL path (namespace-wildcard id) that governs access to a
+     * diagram's media file.
+     *
+     * Media has no per-file ACLs, only per-namespace ones - this is the body
+     * of core's mediaAclPath() (inc/auth.php), inlined because that helper
+     * does not exist on oldstable (missing from 2025-05-14b "Librarian");
+     * inc/media.php in that release spells the same expression out inline at
+     * its own call sites.
+     *
+     * The two callers ask different questions with this same path -
+     * syntax.php's ODT export asks auth_quickaclcheck() >= AUTH_READ,
+     * action.php's ajax handler asks auth_aclcheck() >= AUTH_UPLOAD (or
+     * higher, to overwrite) - which is why this returns the path rather than
+     * an answer.
+     *
+     * @param string $media_id
+     * @return string
+     */
+    public function mediaAclPath($media_id)
+    {
+        return ltrim(getNS($media_id) . ':*', ':');
+    }
+
+    /**
      * The media id of the XML source belonging to a diagram.
      *
      * Derived from the diagram id, never from anything the client sent - the
      * ajax handler is the only writer of .drawio files and it gets the name
      * from here, so there is no request in which a caller names one.
-     *
-     * The png/svg list is the same one action.php's 'save' enforces; a third
-     * output format has to be added in both places (and in the draft gate) or
-     * it silently gets no source.
      *
      * Design decision (not an accident of the naming scheme): a diagram's
      * identity is its id without the extension - ns:plan - not ns:plan.png or
@@ -55,6 +95,16 @@ class helper_plugin_drawio extends DokuWiki_Plugin
      * reviewed) is a bigger surprise than a stale picture, so it was
      * considered and rejected.
      *
+     * Drafts (action.php's draft_save/draft_get/draft_rm, and the matching
+     * localStorage key in script.js) are the one place that deliberately
+     * does NOT follow this identity: they are keyed per rendering format
+     * (ns:plan.png / ns:plan.svg), not per diagram (ns:plan), even though a
+     * draft's payload is format-independent XML - so the two formats of one
+     * diagram can hold divergent drafts. That is intentional, not an
+     * inconsistency to fix: keying a draft by format is the safer default
+     * (it cannot surface a PNG draft inside an SVG editor), so it stays that
+     * way even though it disagrees with the source/lock identity above.
+     *
      * The one real hazard: a wiki that already has ns:plan.png and
      * ns:plan.svg as two genuinely *different* diagrams (both existed before
      * this feature, so both still only have their source embedded in their
@@ -69,8 +119,8 @@ class helper_plugin_drawio extends DokuWiki_Plugin
      */
     public function sourceID($media_id)
     {
+        if (!$this->isDiagramExtension($media_id)) return '';
         $ext = strtolower(pathinfo($media_id, PATHINFO_EXTENSION));
-        if (!in_array($ext, ['png', 'svg'], true)) return '';
         return substr($media_id, 0, -strlen($ext)) . 'drawio';
     }
 

@@ -267,6 +267,7 @@
             // to an uncaught fatal. A normal client never sends this.
             if (trim($name) === '') {
                 if ($action == 'get_auth') {
+                    header('Content-Type: application/json');
                     echo json_encode(false);
                 }
                 return;
@@ -290,13 +291,10 @@
 			// deriving them separately let a crafted name be cleaned into one
 			// namespace for the check and another for the write.
 			//
-			// And it is the *namespace* that decides a media file's permission,
-			// as core does it - this is the body of core's mediaAclPath()
-			// (inc/auth.php), inlined because that helper does not exist in all
-			// supported releases (it is missing from 2025-05-14b "Librarian",
-			// which is still oldstable); inc/media.php in that release spells
-			// the same expression out inline too.
-			$acl_path = ltrim(getNS($media_id) . ':*', ':');
+			// The ACL path itself lives in helper::mediaAclPath() - see its
+			// docblock for why this and syntax.php ask different questions with it.
+			$helper = plugin_load('helper', 'drawio');
+			$acl_path = $helper ? $helper->mediaAclPath($media_id) : ltrim(getNS($media_id) . ':*', ':');
 
 			// Check ACL. Mirror core's inc/media.php media_save(): AUTH_UPLOAD is
 			// the baseline for everything (creating a new diagram, and even the
@@ -317,6 +315,10 @@
 			// something that then silently fails.
 			if ($action == 'get_auth')
             {
+				// application/json, same as every other JSON-returning action here -
+				// this used to be the one that didn't, which is why script.js had to
+				// compare the *string* 'true' instead of reading a real boolean.
+				header('Content-Type: application/json');
 				echo json_encode($overwrite_granted);
 				return;
             }
@@ -332,9 +334,14 @@
 			// action may name are a png's or an svg's. Checking it once here
 			// covers draft_save, draft_rm and draft_get alike, and rejects an
 			// imageName that already ends in .draft instead of stacking a
-			// second suffix onto it ('x.draft' -> 'x.draft.draft'). These are
-			// the same two formats the ['png', 'svg'] list in 'save' allows -
-			// change one and you have to change the other.
+			// second suffix onto it ('x.draft' -> 'x.draft.draft'). This stays a
+			// regex rather than a helper::isDiagramExtension() call - by this
+			// point the '.draft' suffix is already part of $media_id, so the
+			// extension PATHINFO_EXTENSION would see is 'draft', not png/svg -
+			// collapsing this would cost a second argument or a strip-then-check
+			// step for a single call site. helper::isDiagramExtension() is still
+			// the one place that lists which extensions are diagrams; a third
+			// rendering format has to be added there and, separately, here.
 			if ($suffix !== '' && !preg_match('/\.(png|svg)\.draft$/', $media_id)) {
 				http_status(400);
 				return;
@@ -347,6 +354,17 @@
 					return;
 				}
 
+				// Unlike draft_save (see its own lock()/renewal comment below),
+				// 'save' does not renew the advisory lock itself - not an
+				// oversight. script.js's 'save' postMessage event fires a
+				// draft_save just before the 'export' round trip that leads
+				// here, so a real save renews the lock a moment earlier anyway;
+				// and the editor's own interval timer (see script.js's
+				// edit_cb()) renews independently of either. Adding a third
+				// renewal here would only cover the gap between those two -
+				// which the timer (at most locktime/3 old) already keeps well
+				// inside locktime - for no observable difference.
+
 				// This handler writes $fl directly, bypassing core's own upload
 				// path (inc/media.php's media_save()) and the extension whitelist
 				// it enforces there - verified live: imageName=test:pwn.php with a
@@ -357,10 +375,11 @@
 				// XSS markers and, for images, that decoded bytes actually match
 				// the claimed mimetype - moot here since we control the mimetype
 				// ourselves, and it does nothing at all for image/svg+xml).
-				// Keep this list and the \.(png|svg)\.draft$ pattern in the draft
-				// gate above in step: a third output format has to be added to
-				// both, or drafts stop working for diagrams saved in it.
-				if (!in_array(pathinfo($media_id, PATHINFO_EXTENSION), ['png', 'svg'], true)) {
+				// helper::isDiagramExtension() is the single home for the png/svg
+				// question; see its docblock for why the draft gate above still
+				// asks it as a regex instead.
+				$helper = plugin_load('helper', 'drawio');
+				if (!$helper || !$helper->isDiagramExtension($media_id)) {
 					http_status(400);
 					return;
 				}

@@ -56,5 +56,6 @@ A stale date in `plugin.info.txt` means installed wikis never see the update
 ## CI
 
 `.github/workflows/ci.yml` runs the metadata check, `php -l`, the JavaScript
-check, and the PHP test suite against **master, stable and oldstable** on every push and once a week - the
+check, and the PHP test suite against **master, stable and oldstable** on every pull request, on
+pushes to master, and once a week - the
 weekly run is what catches a new DokuWiki release breaking the plugin.

@@ -422,6 +422,42 @@ console.log('OK: a rejected save keeps the draft instead of losing the diagram')
 
 console.log('OK: every ajax call carries the DokuWiki security token (sectok)');
 
+// --- get_auth now reads as a real boolean, and fails silently ------------
+//
+// action.php now sends application/json for get_auth like every other JSON
+// action, so jQuery hands edit()'s callback a real boolean - the old
+// `data != 'true'` string compare must be gone. And the call itself must be
+// silent: a denial (a successful response carrying `false`) already shows
+// the user nothing, so a failed request (e.g. an expired sectok) must not
+// show the noisy generic "request failed" alert either - the two must not
+// disagree about how loud they are.
+{
+    const { sandbox, postCalls, alerts } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit(makeImage('perm.png'));
+    const authCall = postCalls.find((c) => c.data && c.data.action === 'get_auth');
+    assert.ok(authCall, 'test setup: get_auth must be posted');
+
+    // permission granted: a real boolean true, not the string 'true'
+    authCall.successCb(true);
+    assert.strictEqual(sandbox.editorOpen, true, 'a true response must open the editor');
+    sandbox.editorOpen = false;
+
+    // permission denied: must not open the editor and must not alert
+    authCall.successCb(false);
+    assert.strictEqual(sandbox.editorOpen, false, 'a false response must not open the editor');
+    assert.strictEqual(alerts.length, 0, 'a permission denial must not alert');
+
+    // the request itself failing (e.g. an expired sectok, a 403) must be
+    // just as quiet - drawioPost only attaches its generic alert when not
+    // silent, so silent:true must mean no .fail() handler was ever wired
+    assert.strictEqual(authCall.failCb, null,
+        'get_auth must be posted silently: true, so a failed request does not alert');
+}
+
+console.log('OK: get_auth is read as a real boolean and fails silently, like a denial does');
+
 // --- regression test for S6: SVG export must not innerHTML raw markup ----
 //
 // edit_cb()'s 'export' handler used to decode the data URI drawio's iframe
@@ -431,44 +467,42 @@ console.log('OK: every ajax call carries the DokuWiki security token (sectok)');
 // (onload, onerror, ...) fire on markup inserted this way - lib/exe/fetch.php
 // sends a strict CSP, but this path never goes through it, and doku.php
 // sends no CSP at all. This drives the 'export'/'svg' branch directly and
-// asserts the DOM node it produces was never handed raw markup via
-// innerHTML, and that a handler embedded in the payload never runs.
+// asserts it never touches innerHTML and that a handler embedded in the
+// payload never runs.
+//
+// It also pins the fix for the bug this same branch used to carry: the old
+// replaceChild() swapped in a brand new <img> with a hardcoded class/style,
+// discarding the width/height/title/alt syntax.php had computed for this
+// diagram until the next page load. Setting src on the existing node (same
+// as the png branch) keeps them - asserted here by checking the existing
+// image's attributes are untouched aside from src.
 {
     const { sandbox, messageListeners, iframes } = buildSandbox();
     loadScript(sandbox);
 
-    sandbox.edit_cb(makeImage('malicious.svg'));
+    const image = makeImage('malicious.svg');
+    image.setAttribute('title', 'My title');
+    image.setAttribute('style', 'max-width:100%;cursor:pointer;width:200px;height:100px;');
+    sandbox.edit_cb(image);
     const receive = messageListeners[messageListeners.length - 1];
     const source = iframes[iframes.length - 1].contentWindow;
-
-    // the DOM node the export handler looks up (via document.getElementById)
-    // and replaces - a plain stub, not a real DOM, since this harness has no
-    // browser
-    let replaced = null;
-    const tdElement = { id: 'malicious.svg', parentNode: null };
-    const trElement = {
-        style: {},
-        replaceChild: (newNode) => { replaced = newNode; },
-    };
-    tdElement.parentNode = trElement;
-    sandbox.document.getElementById = (id) => (id === 'malicious.svg' ? tdElement : null);
-    // createElement('img') needs its own stub distinct from the generic
-    // iframe stub above (which lacks a settable .src)
-    sandbox.document.createElement = (tag) => (
-        tag === 'img' ? { setAttribute() {} } : { setAttribute() {}, contentWindow: { postMessage() {} } }
-    );
 
     const payload = '<svg onload="window.pwned = true"><a href="x">y</a></svg>';
     const svgDataUri = 'data:image/svg+xml;base64,' + Buffer.from(payload).toString('base64');
     receive({ source, data: JSON.stringify({ event: 'export', format: 'svg', data: svgDataUri }) });
 
-    assert.ok(replaced, 'the export handler must still replace the diagram DOM node');
-    assert.strictEqual(replaced.innerHTML, undefined,
+    assert.strictEqual(image.innerHTML, undefined,
         'raw SVG markup must never be assigned via innerHTML');
-    assert.strictEqual(replaced.src, svgDataUri,
-        'the freshly saved SVG must be loaded as an <img> src, not inlined as markup');
+    assert.strictEqual(image.getAttribute('src'), svgDataUri,
+        'the freshly saved SVG must be loaded via the existing image\'s src, not inlined as markup');
     assert.strictEqual(sandbox.window.pwned, undefined,
         'a handler embedded in the SVG payload must never execute');
+    // the size/title syntax.php computed must survive the save - this is
+    // exactly what the old replaceChild()-with-a-fresh-<img> approach lost
+    assert.strictEqual(image.getAttribute('title'), 'My title',
+        'title must survive an svg export');
+    assert.strictEqual(image.getAttribute('style'), 'max-width:100%;cursor:pointer;width:200px;height:100px;',
+        'width/height (via style) must survive an svg export');
 }
 
 console.log('OK: SVG export does not inject raw markup into the page (S6)');

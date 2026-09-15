@@ -47,14 +47,40 @@ class action_plugin_drawio_test extends DokuWikiTest
     }
 
     /**
+     * Post one ajax request the way script.js does. The one place that builds
+     * a TestRequest and posts to the plugin's endpoint - every test in this
+     * suite (directly, or through the four named helpers below) goes through
+     * this instead of repeating the same TestRequest()+post([...]) pair by
+     * hand, which is what this file used to do at every single call site.
+     *
+     * $server sets request server vars (e.g. REMOTE_USER) before posting -
+     * needed by the token/lock tests, which post as a particular user.
+     *
+     * Deprecation notices already printed to stdout during bootstrap leave PHP
+     * thinking headers were sent, so TestRequest's header_remove() warns here on
+     * every run - suppressed here, once, instead of at every call site, since
+     * it is unrelated to whatever the test using this is actually checking.
+     *
+     * @param array $post   everything except 'call', which is always 'plugin_drawio'
+     * @param array $server e.g. ['REMOTE_USER' => 'alice']
+     * @return \TestResponse
+     */
+    protected function ajaxPost(array $post, array $server = [])
+    {
+        $request = new TestRequest();
+        foreach ($server as $key => $value) {
+            $request->setServer($key, $value);
+        }
+        return @$request->post(array_merge(['call' => 'plugin_drawio'], $post), '/lib/exe/ajax.php');
+    }
+
+    /**
      * Drive the plugin's ajax handler the same way script.js does for a diagram save.
      */
     protected function saveViaAjax($mediaId, $content = null, $xml = null)
     {
         if ($content === null) $content = $this->pngBytes();
-        $request = new TestRequest();
         $post = [
-            'call' => 'plugin_drawio',
             'action' => 'save',
             'imageName' => $mediaId,
             'content' => 'data:image/png;base64,' . base64_encode($content),
@@ -63,10 +89,7 @@ class action_plugin_drawio_test extends DokuWikiTest
         // exported from; a save without it is what an old cached script.js
         // (or a pre-source diagram) looks like.
         if ($xml !== null) $post['xml'] = $xml;
-        // Deprecation notices already printed to stdout during bootstrap leave PHP
-        // thinking headers were sent, so TestRequest's header_remove() warns here on
-        // every run - suppress that unrelated noise instead of failing the test on it.
-        return @$request->post($post, '/lib/exe/ajax.php');
+        return $this->ajaxPost($post);
     }
 
     /**
@@ -79,9 +102,7 @@ class action_plugin_drawio_test extends DokuWikiTest
     {
         $file = mediaFN('test:keep.png');
         io_makeFileDir($file); file_put_contents($file, 'good-content');
-        $r = new TestRequest();
-        @$r->post(['call'=>'plugin_drawio','action'=>'save',
-                   'imageName'=>'test:keep.png','content'=>'undefined'], '/lib/exe/ajax.php');
+        $this->ajaxPost(['action' => 'save', 'imageName' => 'test:keep.png', 'content' => 'undefined']);
         $this->assertSame('good-content', file_get_contents($file));
     }
 
@@ -161,15 +182,10 @@ class action_plugin_drawio_test extends DokuWikiTest
      */
     public function testSaveWithNoImageNameDoesNotCrash()
     {
-        $request = new TestRequest();
-        $response = @$request->post(
-            [
-                'call' => 'plugin_drawio',
-                'action' => 'save',
-                'content' => 'data:image/png;base64,' . base64_encode('content'),
-            ],
-            '/lib/exe/ajax.php'
-        );
+        $this->ajaxPost([
+            'action' => 'save',
+            'content' => 'data:image/png;base64,' . base64_encode('content'),
+        ]);
 
         $this->assertCount(0, $this->firedEvents, 'nothing should be written/logged for a missing imageName');
         $this->addToAssertionCount(1); // reaching here without a thrown Error/Exception is the point
@@ -249,11 +265,7 @@ class action_plugin_drawio_test extends DokuWikiTest
         io_makeFileDir($file);
         file_put_contents($file, 'png-bytes');
 
-        $request = new TestRequest();
-        $response = @$request->post(
-            ['call' => 'plugin_drawio', 'action' => 'get_png', 'imageName' => $mediaId],
-            '/lib/exe/ajax.php'
-        );
+        $response = $this->ajaxPost(['action' => 'get_png', 'imageName' => $mediaId]);
 
         $data = json_decode($response->getContent(), true);
         $this->assertSame('data:image/png;base64,' . base64_encode('png-bytes'), $data['content']);
@@ -347,16 +359,11 @@ class action_plugin_drawio_test extends DokuWikiTest
     public function testDraftSaveDoesNotFireMediaUploadFinish()
     {
         // drafts are internal scratch files, not media the user owns - see action.php
-        $request = new TestRequest();
-        @$request->post(
-            [
-                'call' => 'plugin_drawio',
-                'action' => 'draft_save',
-                'imageName' => 'test:draftonly.png',
-                'content' => $this->draftJson(),
-            ],
-            '/lib/exe/ajax.php'
-        );
+        $this->ajaxPost([
+            'action' => 'draft_save',
+            'imageName' => 'test:draftonly.png',
+            'content' => $this->draftJson(),
+        ]);
 
         $this->assertCount(0, $this->firedEvents, 'drafts must not fire a media event');
     }
@@ -425,17 +432,14 @@ class action_plugin_drawio_test extends DokuWikiTest
         io_makeFileDir($file);
         file_put_contents($file, 'good-content');
 
-        $request = new TestRequest();
-        $request->setServer('REMOTE_USER', 'testuser');
-        @$request->post(
+        $this->ajaxPost(
             [
-                'call' => 'plugin_drawio',
                 'action' => 'save',
                 'imageName' => 'test:postcsrf.png',
                 'content' => 'data:image/png;base64,' . base64_encode('overwritten'),
                 'sectok' => 'not-the-real-token',
             ],
-            '/lib/exe/ajax.php'
+            ['REMOTE_USER' => 'testuser']
         );
 
         $this->assertSame('good-content', file_get_contents($file), 'a bad token must not write anything');
@@ -451,17 +455,14 @@ class action_plugin_drawio_test extends DokuWikiTest
         $mediaId = 'test:tokenok.png';
         $file = mediaFN($mediaId);
 
-        $request = new TestRequest();
-        $request->setServer('REMOTE_USER', 'testuser');
-        @$request->post(
+        $this->ajaxPost(
             [
-                'call' => 'plugin_drawio',
                 'action' => 'save',
                 'imageName' => $mediaId,
                 'content' => 'data:image/png;base64,' . base64_encode($this->pngBytes()),
                 'sectok' => $this->validTokenFor('testuser'),
             ],
-            '/lib/exe/ajax.php'
+            ['REMOTE_USER' => 'testuser']
         );
 
         $this->assertFileExists($file, 'a valid token must be accepted');
@@ -512,16 +513,11 @@ class action_plugin_drawio_test extends DokuWikiTest
     {
         $this->enableSecretAcl();
 
-        $request = new TestRequest();
-        @$request->post(
-            [
-                'call' => 'plugin_drawio',
-                'action' => 'draft_save',
-                'imageName' => 'public:secret:',
-                'content' => 'smuggled',
-            ],
-            '/lib/exe/ajax.php'
-        );
+        $this->ajaxPost([
+            'action' => 'draft_save',
+            'imageName' => 'public:secret:',
+            'content' => 'smuggled',
+        ]);
 
         $this->assertFileDoesNotExist(
             mediaFN('public:secret:draft'),
@@ -545,11 +541,7 @@ class action_plugin_drawio_test extends DokuWikiTest
         file_put_contents($file, 'secret-draft');
 
         try {
-            $request = new TestRequest();
-            $response = @$request->post(
-                ['call' => 'plugin_drawio', 'action' => 'draft_get', 'imageName' => 'public:locked:'],
-                '/lib/exe/ajax.php'
-            );
+            $response = $this->ajaxPost(['action' => 'draft_get', 'imageName' => 'public:locked:']);
 
             $this->assertStringNotContainsString('secret-draft', $response->getContent());
         } finally {
@@ -586,16 +578,11 @@ class action_plugin_drawio_test extends DokuWikiTest
 
     protected function draftSaveViaAjax($imageName, $content)
     {
-        $request = new TestRequest();
-        return @$request->post(
-            [
-                'call' => 'plugin_drawio',
-                'action' => 'draft_save',
-                'imageName' => $imageName,
-                'content' => $content,
-            ],
-            '/lib/exe/ajax.php'
-        );
+        return $this->ajaxPost([
+            'action' => 'draft_save',
+            'imageName' => $imageName,
+            'content' => $content,
+        ]);
     }
 
     /**
@@ -632,11 +619,7 @@ class action_plugin_drawio_test extends DokuWikiTest
         $this->draftSaveViaAjax('test:round.png', $draft);
         $this->assertSame($draft, file_get_contents(mediaFN('test:round.png.draft')));
 
-        $request = new TestRequest();
-        $response = @$request->post(
-            ['call' => 'plugin_drawio', 'action' => 'draft_get', 'imageName' => 'test:round.png'],
-            '/lib/exe/ajax.php'
-        );
+        $response = $this->ajaxPost(['action' => 'draft_get', 'imageName' => 'test:round.png']);
         $this->assertSame($draft, $response->getContent());
     }
 
@@ -704,11 +687,7 @@ class action_plugin_drawio_test extends DokuWikiTest
         $dir = dirname(mediaFN('freshns:whatever.png'));
         $this->assertDirectoryDoesNotExist($dir);
 
-        $request = new TestRequest();
-        @$request->post(
-            ['call' => 'plugin_drawio', 'action' => 'no_such_action', 'imageName' => 'freshns:whatever.png'],
-            '/lib/exe/ajax.php'
-        );
+        $this->ajaxPost(['action' => 'no_such_action', 'imageName' => 'freshns:whatever.png']);
 
         $this->assertDirectoryDoesNotExist($dir, 'an unrecognised action must not touch the disk');
     }
@@ -724,11 +703,7 @@ class action_plugin_drawio_test extends DokuWikiTest
         io_makeFileDir($shadow);
         file_put_contents($shadow, 'shadow');
 
-        $request = new TestRequest();
-        @$request->post(
-            ['call' => 'plugin_drawio', 'action' => 'draft_rm', 'imageName' => 'test:stale.png.draft'],
-            '/lib/exe/ajax.php'
-        );
+        $this->ajaxPost(['action' => 'draft_rm', 'imageName' => 'test:stale.png.draft']);
 
         $this->assertFileExists($shadow, 'a .draft imageName must be rejected, not suffixed again');
     }
@@ -851,12 +826,11 @@ class action_plugin_drawio_test extends DokuWikiTest
     {
         $mediaId = 'test:vector.svg';
         $xml = $this->diagramXml('svg');
-        $request = new TestRequest();
-        @$request->post([
-            'call' => 'plugin_drawio', 'action' => 'save', 'imageName' => $mediaId,
+        $this->ajaxPost([
+            'action' => 'save', 'imageName' => $mediaId,
             'content' => 'data:image/svg+xml;base64,' . base64_encode($this->svgBytes()),
             'xml' => $xml,
-        ], '/lib/exe/ajax.php');
+        ]);
 
         $this->assertSame($this->svgBytes(), file_get_contents(mediaFN($mediaId)));
         $this->assertSame($xml, file_get_contents(mediaFN('test:vector.drawio')));
@@ -921,21 +895,18 @@ class action_plugin_drawio_test extends DokuWikiTest
         $this->assertFileDoesNotExist(mediaFN('test:evil.drawio'));
 
         // and neither can a draft of one
-        $r = new TestRequest();
-        @$r->post(['call' => 'plugin_drawio', 'action' => 'draft_save',
-                   'imageName' => 'test:evil2.drawio',
-                   'content' => '{"lastModified":1,"xml":"<mxfile/>"}'], '/lib/exe/ajax.php');
+        $this->ajaxPost([
+            'action' => 'draft_save',
+            'imageName' => 'test:evil2.drawio',
+            'content' => '{"lastModified":1,"xml":"<mxfile/>"}',
+        ]);
         $this->assertFileDoesNotExist(mediaFN('test:evil2.drawio.draft'));
     }
 
     /** Drive the open path the way script.js's 'init' handler does. */
     protected function openViaAjax($mediaId, $action = 'get_png')
     {
-        $request = new TestRequest();
-        $response = @$request->post(
-            ['call' => 'plugin_drawio', 'action' => $action, 'imageName' => $mediaId],
-            '/lib/exe/ajax.php'
-        );
+        $response = $this->ajaxPost(['action' => $action, 'imageName' => $mediaId]);
         return json_decode($response->getContent(), true);
     }
 
@@ -1080,12 +1051,11 @@ class action_plugin_drawio_test extends DokuWikiTest
         $this->saveViaAjax($mediaId1, $this->pngBytes(), $this->diagramXml('first'));
         $this->assertFileExists(mediaFN('test:alt.drawio'));
 
-        $request = new TestRequest();
-        @$request->post([
-            'call' => 'plugin_drawio', 'action' => 'save', 'imageName' => $mediaId2,
+        $this->ajaxPost([
+            'action' => 'save', 'imageName' => $mediaId2,
             'content' => 'data:image/svg+xml;base64,' . base64_encode($this->svgBytes()),
             'xml' => $this->diagramXml('second'),
-        ], '/lib/exe/ajax.php');
+        ]);
         $this->assertFileExists(mediaFN('test:alt.drawio'), 'the source must still be there after the second save');
 
         $pngData = $this->openViaAjax($mediaId1, 'get_png');
@@ -1196,18 +1166,14 @@ class action_plugin_drawio_test extends DokuWikiTest
 
     protected function lockRequest($mediaId, $user)
     {
-        $request = new TestRequest();
-        $request->setServer('REMOTE_USER', $user);
-        $response = @$request->post(
+        return $this->ajaxPost(
             [
-                'call' => 'plugin_drawio',
                 'action' => 'lock',
                 'imageName' => $mediaId,
                 'sectok' => $this->validTokenFor($user),
             ],
-            '/lib/exe/ajax.php'
+            ['REMOTE_USER' => $user]
         );
-        return $response;
     }
 
     public function testLockOfAFreshDiagramReportsNoHolder()
@@ -1318,17 +1284,14 @@ class action_plugin_drawio_test extends DokuWikiTest
         $agedMtime = filemtime($lockFile);
         $this->assertLessThanOrEqual(time() - 590, $agedMtime, 'sanity: touch() must have backdated the lock file');
 
-        $request = new TestRequest();
-        $request->setServer('REMOTE_USER', 'alice');
-        @$request->post(
+        $this->ajaxPost(
             [
-                'call' => 'plugin_drawio',
                 'action' => 'draft_save',
                 'imageName' => 'test:renew.png',
                 'content' => $this->draftJson(),
                 'sectok' => $this->validTokenFor('alice'),
             ],
-            '/lib/exe/ajax.php'
+            ['REMOTE_USER' => 'alice']
         );
 
         clearstatcache();
