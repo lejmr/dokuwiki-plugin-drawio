@@ -109,13 +109,13 @@ workflow above, are also there to run by hand while developing.
 ## Verifying a change
 
 These rules exist because each was learned the hard way, in one evening, after
-a reviewer had already signed the work off. The whole process - roles, the
-validation plan with its evidence and stop rules, the batch format for the
-maintainer - is written up as a Claude Code skill in
-`.claude/skills/drive-change/` so that any agent (and any model) working
-on this repository follows it - from the request through validation to the
-release button; the rules below are the part of it that applies to a single
-change. `bin/merge-stages.sh` is the landing step of that flow.
+a reviewer had already signed the work off. The whole process - acceptance
+table of exact outputs first, roles, the validation plan with its evidence
+and stop rules, the batch format for the maintainer, landing and release -
+is the maintainer's user-level `drive-change` skill; `CLAUDE.md` maps it onto
+this repository (the plan itself is `_test/validation-plan.md`, landing is
+`bin/merge-stages.sh`). The rules below are the part that applies to a single
+change.
 
 **Load it in a real browser.** PHP tests run no JavaScript, and `curl` executes
 none either. Anything that ships JS must be opened in a browser with the console
