@@ -297,6 +297,154 @@ class helper_plugin_drawio extends DokuWiki_Plugin
     }
 
     /**
+     * The largest XML this plugin will ever embed into an image - the same
+     * 2 MiB the 'save' handler in action.php already caps a .drawio at on
+     * the way in, reused here (rather than duplicated as a second literal)
+     * as the ceiling for the delete-time attic embedding in action.php's
+     * _embed_source_into_attic(): a .drawio written through this plugin's
+     * own save path can never exceed it, so this only ever bites a source
+     * that reached the media directory some other way.
+     */
+    const MAX_EMBED_XML_BYTES = 2 * 1024 * 1024;
+
+    /**
+     * Write $xml into $bytes as a draw.io 'xmlpng' export would, replacing
+     * any XML the image already carries.
+     *
+     * Used by action.php's _embed_source_into_attic() when a diagram's last
+     * rendering is deleted, to fold its separate .drawio source into the
+     * archived attic copy of the image instead of archiving the source as a
+     * file of its own - see that function's own docblock for why.
+     *
+     * Shape matched against this branch's own real-drawio-export.png
+     * fixture (verified with a PNG chunk walk - see this class's own test
+     * suite): an uncompressed tEXt chunk, keyword 'mxfile', value the XML
+     * URL-encoded, sitting directly after IHDR and before the first IDAT.
+     * Uncompressed on purpose, even though extractPngXml() also reads the
+     * zTXt form real exports sometimes use: a real draw.io *export* can
+     * choose either, but what this writes only ever has to round-trip
+     * through this plugin's own extractPngXml() and stay a well-formed
+     * draw.io source the real editor can open - and every embed.diagrams.net
+     * version this plugin has been verified against opens an uncompressed
+     * tEXt 'mxfile' chunk exactly as readily as a compressed one, so there is
+     * nothing simpler that only complicates the writer. Placed right after
+     * IHDR (not appended near IEND) to match that same fixture's own chunk
+     * order, on the chance that some tool - draw.io itself included - reads
+     * only the first text chunk it finds.
+     *
+     * Any existing tEXt/zTXt chunk keyed 'mxfile' or 'mxGraphModel' is
+     * dropped, not kept alongside the new one - two disagreeing copies of a
+     * diagram's source in one file is worse than one, and extractPngXml()
+     * itself only ever returns the first match it finds, so a stale second
+     * chunk would just be dead weight at best.
+     *
+     * @param string $bytes contents of the png
+     * @param string $xml   the diagram source to embed
+     * @return string       the new png bytes, or '' if $bytes is not a well
+     *                      formed PNG (bad signature, truncated chunk, or no
+     *                      IHDR as the very first chunk) or $xml is too long
+     */
+    public function embedPngXml($bytes, $xml)
+    {
+        $xml = (string) $xml;
+        if ($xml === '' || strlen($xml) > self::MAX_EMBED_XML_BYTES) return '';
+
+        $len = strlen($bytes);
+        if ($len < 8 || strncmp($bytes, "\x89PNG\r\n\x1a\n", 8) !== 0) return '';
+
+        // IHDR is always the very first chunk (PNG spec) - read it, and only
+        // it, before inserting the new chunk right after.
+        if ($len < 20) return '';
+        $size = unpack('N', substr($bytes, 8, 4))[1];
+        if (substr($bytes, 12, 4) !== 'IHDR' || $size < 0 || 8 + 12 + $size > $len) return '';
+        $ihdrEnd = 8 + 12 + $size;
+        $ihdr = substr($bytes, 8, $ihdrEnd - 8);
+
+        $data = "mxfile\0" . rawurlencode($xml);
+        $newChunk = pack('N', strlen($data)) . 'tEXt' . $data . pack('N', crc32('tEXt' . $data));
+
+        // Copy every remaining chunk as-is, dropping a stale source chunk -
+        // see this method's own docblock for why.
+        $pos = $ihdrEnd;
+        $rest = '';
+        while ($pos + 12 <= $len) {
+            $chunkSize = unpack('N', substr($bytes, $pos, 4))[1];
+            $type = substr($bytes, $pos + 4, 4);
+            if ($chunkSize < 0 || $pos + 12 + $chunkSize > $len) return ''; // truncated/corrupt
+            $chunk = substr($bytes, $pos, 12 + $chunkSize);
+            $pos += 12 + $chunkSize;
+
+            if ($type === 'tEXt' || $type === 'zTXt') {
+                $chunkData = substr($chunk, 8, $chunkSize);
+                $nul = strpos($chunkData, "\0");
+                $keyword = $nul !== false ? substr($chunkData, 0, $nul) : '';
+                if ($keyword === 'mxfile' || $keyword === 'mxGraphModel') continue; // stale, dropped
+            }
+
+            $rest .= $chunk;
+            if ($type === 'IEND') break;
+        }
+
+        return substr($bytes, 0, 8) . $ihdr . $newChunk . $rest;
+    }
+
+    /**
+     * Write $xml into $bytes as a draw.io 'xmlsvg' export would, replacing
+     * any XML the image already carries.
+     *
+     * Used the same way, and for the same reason, as embedPngXml() above -
+     * see that method's own docblock.
+     *
+     * Shape matched against this branch's own real-drawio-export.svg
+     * fixture: a content="..." attribute on the root <svg> element, holding
+     * the XML XML-escaped, with "\n"/"\r" written as their own character
+     * references ('&#10;'/'&#13;') rather than left as literal bytes
+     * (verified against that fixture - a literal newline inside an
+     * attribute is legal XML, normalised to a space by any conformant
+     * parser, which would silently corrupt the embedded source; a real
+     * draw.io export never lets that happen, and neither does this).
+     * Encoded individually, not as a single reference for a collapsed
+     * "\r\n", so a source that genuinely contains a CRLF still round-trips
+     * byte for byte. extractSvgXml()'s html_entity_decode(..., ENT_QUOTES |
+     * ENT_XML1, ...) decodes each numeric reference back to its own
+     * character, so the round trip is exact.
+     *
+     * @param string $bytes contents of the svg
+     * @param string $xml   the diagram source to embed
+     * @return string       the new svg bytes, or '' if $bytes has no root
+     *                      <svg> element or $xml is too long
+     */
+    public function embedSvgXml($bytes, $xml)
+    {
+        $xml = (string) $xml;
+        if ($xml === '' || strlen($xml) > self::MAX_EMBED_XML_BYTES) return '';
+
+        $bytes = (string) $bytes;
+        if (!preg_match('/<svg\b[^>]*>/i', $bytes, $root, PREG_OFFSET_CAPTURE)) return '';
+        $tag = $root[0][0];
+        $tagStart = $root[0][1];
+
+        $escaped = htmlspecialchars($xml, ENT_QUOTES | ENT_XML1, 'UTF-8');
+        // \r and \n each become their own character reference (not a single
+        // '&#10;' for a collapsed "\r\n") so a source that genuinely
+        // contains a CRLF round-trips byte for byte - html_entity_decode()
+        // on the read side decodes each numeric reference back to its own
+        // character, reassembling the original pair exactly.
+        $escaped = str_replace(["\r", "\n"], ['&#13;', '&#10;'], $escaped);
+
+        if (preg_match('/\scontent\s*=\s*(["\']).*?\1/is', $tag, $m, PREG_OFFSET_CAPTURE)) {
+            $newTag = substr($tag, 0, $m[0][1]) . ' content="' . $escaped . '"'
+                . substr($tag, $m[0][1] + strlen($m[0][0]));
+        } else {
+            $selfClosing = substr($tag, -2) === '/>';
+            $insertAt = strlen($tag) - ($selfClosing ? 2 : 1);
+            $newTag = substr($tag, 0, $insertAt) . ' content="' . $escaped . '"' . substr($tag, $insertAt);
+        }
+
+        return substr($bytes, 0, $tagStart) . $newTag . substr($bytes, $tagStart + strlen($tag));
+    }
+
+    /**
      * The ids of pages whose relation_media metadata lists $media_id -
      * straight from DokuWiki's own metadata index, not a live scan of every
      * page's syntax. That matters for a caller deciding what to reindex: this
@@ -328,12 +476,107 @@ class helper_plugin_drawio extends DokuWiki_Plugin
      * @param string $media_id
      * @return string[] page ids
      */
+    /**
+     * Re-index one page so the search index reflects the diagram XML its
+     * syntax now resolves to. Indexer::addPage() is the current API;
+     * idx_addPage() is only kept for oldstable, where the class exists
+     * but has no addPage() yet.
+     *
+     * @param string $page
+     * @return bool
+     */
+    public function reindexPage($page)
+    {
+        if (method_exists('dokuwiki\\Search\\Indexer', 'addPage')) {
+            try {
+                return (new \dokuwiki\Search\Indexer())->addPage($page, true);
+            } catch (\Exception $e) {
+                return false;
+            }
+        }
+        return idx_addPage($page, false, true);
+    }
+
     public function pagesUsing($media_id)
     {
         if (class_exists('dokuwiki\\Search\\MetadataSearch')) {
             return (new \dokuwiki\Search\MetadataSearch())->mediause($media_id, true);
         }
         return ft_mediause($media_id, true);
+    }
+
+    /**
+     * Discard every cached render of $page that could embed a diagram's
+     * bytes, so a format like ODT - which inlines the image, unlike xhtml -
+     * picks up what a diagram save just wrote instead of a stale copy.
+     *
+     * The defect this exists to fix: DokuWiki caches a page's rendered
+     * output per format (dokuwiki\Cache\CacheRenderer, inc/Cache/
+     * CacheRenderer.php) and invalidates it when the page's own source or
+     * metadata changes - but saving a diagram (action.php's 'save' handler)
+     * or giving one a source (admin.php's bulk-conversion task) writes media
+     * files only, never the page, so a cache built before either stays
+     * "valid" forever as far as p_cached_output() (inc/parserutils.php) can
+     * tell. Verified live exactly as the maintainer found it: an ODT export
+     * kept embedding an hour-old picture at the old file size after the
+     * on-disk diagram had changed, until the cache directory was cleared by
+     * hand; after clearing it, the same export embedded the current bytes at
+     * the right size.
+     *
+     * Which formats: xhtml is deliberately left alone. Its rendered output
+     * only ever contains a stable fetch.php URL for a diagram (see
+     * syntax.php), never the image bytes themselves, so a cached xhtml
+     * render is still correct after the diagram changes - fetch.php serves
+     * the current file regardless of what the page cache says. Every other
+     * format is purged, not just 'odt': dw2pdf's 'pdf' mode and any other
+     * renderer inline whatever a page embeds the same way ODT does, and this
+     * plugin has no business knowing every renderer a wiki might have
+     * installed.
+     *
+     * How: DokuWiki does not offer a "purge one page, every format" call.
+     * The two things core does offer are either too broad or too narrow for
+     * that job - touching cachedir/purgefile (inc/File/PageFile.php, done on
+     * every normal page save) invalidates every cached render of every page
+     * in the whole wiki, not just the handful that embed this diagram; and
+     * dokuwiki\Cache\CacheRenderer::removeCache() (inc/Cache/Cache.php) only
+     * ever expires the one mode it was built for, which means naming every
+     * renderer's mode by hand. Instead this reuses how core names a cache
+     * file at all: getCacheName() (inc/pageutils.php) is
+     * $conf['cachedir']/x/md5($data).$ext, and CacheParser's constructor
+     * (inc/Cache/CacheParser.php) builds $data from the page's source file
+     * plus an environment key (CacheRenderer::getEnvironmentKey() returns
+     * DOKU_BASE for every mode except 'metadata') - never from the mode
+     * itself, which is only ever the appended extension. So every
+     * renderer's cache for the same page and the same environment shares
+     * one md5 and differs only by extension; metadata's cache, whose
+     * environment key is empty instead of DOKU_BASE, hashes differently and
+     * is never matched here, which is exactly right - this is about
+     * embedded bytes, not metadata. One CacheRenderer instance gives the
+     * shared prefix; glob() finds whichever extensions actually exist
+     * (nothing to enumerate, nothing to guess); and each match is expired
+     * through a real CacheRenderer's removeCache() - the same unlink() core
+     * itself uses to drop a cache file, not a hand-rolled delete.
+     *
+     * Failure: every caller wraps this in its own try/catch - a purge that
+     * fails must never turn an already-successful diagram save (or a
+     * successful batch of conversions) into a failed request. Cost: one
+     * CacheRenderer + one glob() + zero or more unlink()s per page, run
+     * inside whatever cap the caller already applies to its own page list
+     * (action.php's $reindexPageCap for a save; uncapped, like its own
+     * reindex, for admin.php's already-batched bulk task).
+     *
+     * @param string $page page id
+     */
+    public function purgeDiagramPageCache($page)
+    {
+        $cache = new \dokuwiki\Cache\CacheRenderer($page, wikiFN($page), 'xhtml');
+        $prefix = substr($cache->cache, 0, -strlen('.xhtml'));
+
+        foreach ((glob($prefix . '.*') ?: []) as $file) {
+            $ext = substr($file, strlen($prefix) + 1);
+            if ($ext === 'xhtml') continue; // still correct - see docblock above
+            (new \dokuwiki\Cache\CacheRenderer($page, wikiFN($page), $ext))->removeCache();
+        }
     }
 
     /**
@@ -368,12 +611,40 @@ class helper_plugin_drawio extends DokuWiki_Plugin
      *
      * A label's actual text sits in each element's value="..." attribute,
      * HTML-escaped, and - for anything beyond a single line - containing
-     * real markup ("<div>JavaScript</div><div>Source Code<br></div>" for a
+     * real markup ("<div>Bytecode</div><div>Compiler<br></div>" for a
      * two-line label, verified against real-drawio-export.png). Tags are
      * stripped after the entities are decoded, not before, so an escaped
      * "&lt;" that is part of someone's actual label text is not mistaken
      * for markup, and a real tag is not left in the indexed text as a
-     * literal "<div>".
+     * literal "<div>". Entities are decoded twice, with the full HTML5
+     * table (ENT_HTML5) rather than just the five XML ones: a shape whose
+     * style says html=1 has its value interpreted as HTML by draw.io
+     * itself, so a real export double-escapes an entity that is part of
+     * that HTML - "API:&amp;amp;nbsp;socket()" in real-drawio-export.svg
+     * for a label whose actual text is "API:" + a non-breaking space.
+     * html_entity_decode() only ever undoes one level (PHP does not decode
+     * recursively), so a single call leaves the inner "&amp;nbsp;" behind
+     * as a literal, unreadable "&nbsp;" in the index; a second call is a
+     * no-op on already-plain text (an entity needs a leading "&" and a
+     * trailing ";" to be decoded at all, so ordinary text - including a
+     * literal "&&" that survived the first pass - is left alone by the
+     * second).
+     *
+     * A block-level boundary in that markup - "</div><div>", "<br>", "<p>",
+     * a list or table row - is where draw.io breaks one line from the next,
+     * so it becomes a space before tags are stripped: leaving it out runs
+     * two separate lines together into one unsearchable word ("Bytecode"
+     * and "Compiler" becoming "BytecodeCompiler", the exact shape of the
+     * defect that shipped - two labels indexed as one token because nothing
+     * sat between them). An *inline* tag (draw.io's other real-world case,
+     * "<b>mc</b>.your.domain" - both fixtures above) is left bare instead,
+     * because it sits mid-word on purpose and turning it into a space would
+     * split one word into two ("mc" / ".your.domain") that a search for the
+     * whole word would then miss.
+     *
+     * Separate values - separate shapes, or a shape and, once collected, a
+     * tooltip - already get their own leading space below; nothing here
+     * needs to add another one for that boundary.
      *
      * Bounded three ways, because the input is an untrusted file (or, once
      * the admin migration task exists, a great many of them, unattended):
@@ -417,7 +688,13 @@ class helper_plugin_drawio extends DokuWiki_Plugin
 
             if (!preg_match_all('/\bvalue\s*=\s*(["\'])(.*?)\1/is', $content, $values)) continue;
             foreach ($values[2] as $value) {
-                $text = trim(strip_tags(html_entity_decode($value, ENT_QUOTES | ENT_XML1, 'UTF-8')));
+                $decoded = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $decoded = html_entity_decode($decoded, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                // block-level markup is a line break in draw.io's own rich
+                // text - turn it into a space before the remaining (inline)
+                // tags are stripped bare - see this method's own docblock.
+                $decoded = preg_replace('#</?(?:div|p|li|tr|table|ul|ol|h[1-6])\b[^>]*>|<br\s*/?>#i', ' ', $decoded);
+                $text = trim(preg_replace('/ {2,}/', ' ', strip_tags($decoded)));
                 if ($text === '') continue;
                 $out .= ' ' . $text;
                 if (strlen($out) >= $cap) break;

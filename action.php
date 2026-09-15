@@ -17,6 +17,17 @@
         // needing dozens of real pages to prove the cap works.
         protected $reindexPageCap = 50;
 
+        // The mtime a diagram image had the instant before core deleted it -
+        // captured by _media_delete_capture_mtime() (BEFORE) so
+        // _media_delete_sibling() (AFTER) can find the exact attic copy core
+        // just archived it to (mediaFN($id, $mtime) - see that function's own
+        // docblock for why). By the time the AFTER hook runs the live file is
+        // already gone, so its mtime has to be captured before that happens;
+        // keyed by id rather than a single scalar only for the (never
+        // observed, cheap-to-guard-anyway) case of one request deleting more
+        // than one diagram rendering.
+        protected $_deletedMtime = [];
+
         public function register(Doku_Event_Handler $controller) {
             $controller->register_hook('DOKUWIKI_STARTED', 'AFTER', $this, 'addjsinfo');
             // lib/exe/mediamanager.php never fires DOKUWIKI_STARTED, so without this
@@ -33,6 +44,7 @@
             // that rewrites the image - is undone by an ordinary delete or
             // rename. See _media_delete_sibling()/_move_sibling() below for
             // the reasoning behind each direction.
+            $controller->register_hook('MEDIA_DELETE_FILE', 'BEFORE', $this, '_media_delete_capture_mtime');
             $controller->register_hook('MEDIA_DELETE_FILE', 'AFTER', $this, '_media_delete_sibling');
             // Core has no media rename/move event of its own - deleting the
             // old id and uploading the new one is literally how a media
@@ -829,16 +841,58 @@
         }
 
         /**
-         * Delete an image's diagram source along with it.
+         * Remember a diagram image's mtime the instant before core deletes
+         * it, so the AFTER hook below can find the exact attic copy core is
+         * about to archive it to - see that function's own docblock for why.
+         *
+         * BEFORE, not AFTER: by the time MEDIA_DELETE_FILE's AFTER phase
+         * runs the file is already unlinked, so its mtime has to be read
+         * while it still exists. Core computes its own archive timestamp
+         * (media.php's media_delete(), `$old = @filemtime($file)`) at this
+         * same point in the same request, right after the BEFORE phase
+         * completes - so reading it here, with nothing of ours writing to
+         * the file in between, reads the identical value.
+         *
+         * @param Doku_Event $event MEDIA_DELETE_FILE, fired BEFORE
+         */
+        function _media_delete_capture_mtime(Doku_Event $event, $param) {
+            $media_id = $event->data['id'];
+            $helper = plugin_load('helper', 'drawio');
+            if (!$helper) return;
+            // a rendering (png/svg) - or the source itself, deleted directly
+            if ($helper->sourceID($media_id) === '' && substr($media_id, -7) !== '.drawio') return;
+
+            $this->_deletedMtime[$media_id] = @filemtime(mediaFN($media_id));
+        }
+
+        /**
+         * Delete an image's diagram source along with it - archiving the
+         * source's current XML into the image's own attic copy on the way
+         * out, instead of leaving the .drawio behind as a file of its own.
          *
          * The maintainer's call, not a default arrived at by process of
          * elimination: deleting a diagram in the media manager deletes it -
-         * no .drawio left behind that nobody asked to keep. This is not as
-         * destructive as it sounds: with mediarevisions on (the default),
-         * core's media_delete() already sent the deleted image to the attic
-         * before this hook even runs, and calling media_delete() again below
-         * for the source does exactly the same for it - "delete" undoes on
-         * both halves exactly as far as it undoes on one.
+         * no .drawio left behind that nobody asked to keep.
+         *
+         * Why embed rather than archive the .drawio separately (the
+         * original design here, before this defect was found): core builds
+         * an attic filename from mimetype($id) (inc/pageutils.php's
+         * mediaFN()), which only knows extensions listed in mime.conf.
+         * '.drawio' never is one, so mimetype() returns false for it and
+         * mediaFN()'s arithmetic silently corrupts the name - see
+         * _test/data-delta.test.php's
+         * testDeletingTheLastRenderingArchivesTheSourceWithACorruptedAtticFilename()
+         * for the exact mechanism and a live repro. Registering '.drawio' in
+         * mime.conf would dodge that specific bug, but a plain-text .drawio
+         * attic entry is still a second, easy-to-miss archive per diagram,
+         * with its own changelog and its own (now correctly-named, but
+         * still separate) revision history to keep in sync with the
+         * image's - exactly the split this plugin exists to heal, not
+         * reintroduce on the way out. Embedding sidesteps the naming bug
+         * entirely (a .png/.svg attic name was never wrong) and gives a
+         * restored revision something this plugin can still open on its
+         * own, the same way every diagram could before it had a separate
+         * source at all - see helper.php's own docblock.
          *
          * The one case this does NOT cascade: ns:plan.png and ns:plan.svg
          * are two renderings of the very same diagram (see helper.php's
@@ -860,21 +914,32 @@
          * and having that silently delete somebody's picture is the more
          * surprising direction of the two, so it does not happen.
          *
-         * media_delete() (not a bare unlink()) both to get the attic/
-         * changelog behaviour above for free and because it fires
-         * MEDIA_DELETE_FILE itself - a backup plugin watching that event
-         * hears about the source exactly the way it hears about the image,
-         * with no second event type to teach it about. That also means this
-         * hook re-enters itself once for the source's own delete; it is
-         * harmless because helper::sourceID('ns:plan.drawio') is '' (a
-         * .drawio is not itself a diagram *rendering*), so the second call
-         * returns immediately.
+         * No source exists (an old diagram never re-saved through this
+         * plugin): nothing to do here at all - its image already carries
+         * whatever XML it was exported with, and this function returns
+         * before ever looking at the attic.
          *
-         * ACL: deliberately re-checked by media_delete() itself
-         * (auth_quickaclcheck() against the source's own namespace, which is
-         * always the same namespace the image lived in) rather than assumed
-         * from the image's delete having already been permitted - cheap,
-         * and it is what keeps this correct if that ever changes.
+         * Image missing from the attic (mediarevisions off, so core's own
+         * media_saveOldRevision() never archived it in the first place - or
+         * this plugin's own captured mtime is unavailable for any reason):
+         * there is nothing to embed the source's XML into, so nothing is
+         * archived for the source either - it is simply deleted, unarchived,
+         * exactly as its image was. Manufacturing a fresh attic entry
+         * outside core's own revisions-on/off rule would archive the source
+         * more thoroughly than the image it belongs to, which is a
+         * inconsistency of its own.
+         *
+         * Size: _embed_source_into_attic() below bounds the XML it will
+         * embed (matching the 2 MiB cap the 'save' handler already enforces
+         * on the way in - see its own comment). A diagram whose source
+         * somehow exceeds that (never possible through this plugin's own
+         * save path) is still archived - just as the plain image core
+         * already put in the attic, with nothing embedded - rather than
+         * growing the attic file without bound or failing the delete.
+         *
+         * unlink(), not media_delete(), for the source itself - see the
+         * inline comment right above that call for why, and for how a
+         * backup plugin still hears about the deletion despite that.
          *
          * @param Doku_Event $event MEDIA_DELETE_FILE, fired AFTER
          */
@@ -887,15 +952,85 @@
             $helper = plugin_load('helper', 'drawio');
             if (!$helper) return;
 
+            // The source itself deleted straight from the media manager:
+            // core archived it first, but .drawio has no mimetype, so
+            // mediaFN($id, $rev) came out as "name.drawi.<rev>." - a file
+            // nothing can list or restore. Remove it; the image this source
+            // belonged to is still there (its own attic keeps the XML).
+            if (substr($media_id, -7) === '.drawio') {
+                $rev = isset($this->_deletedMtime[$media_id]) ? $this->_deletedMtime[$media_id] : 0;
+                unset($this->_deletedMtime[$media_id]);
+                if ($rev && substr(mediaFN($media_id, $rev), -1) === '.') @unlink(mediaFN($media_id, $rev));
+                return;
+            }
+
             $src_id = $helper->sourceID($media_id);
             if ($src_id === '') return; // not a png/svg rendering - nothing owns a source
 
             $other = $helper->otherRenderingID($media_id);
             if ($other !== '' && file_exists(mediaFN($other))) return; // still needed
 
-            if (!file_exists(mediaFN($src_id))) return; // nothing to delete
+            $src_fl = mediaFN($src_id);
+            if (!file_exists($src_fl)) return; // nothing to delete
 
-            media_delete($src_id, AUTH_DELETE);
+            $this->_embed_source_into_attic($media_id, $src_fl, $helper);
+            unset($this->_deletedMtime[$media_id]);
+
+            // unlink(), not media_delete(): media_delete() is what produces
+            // the corrupted attic entry this whole function exists to avoid
+            // (see its own docblock), and re-running its ACL check would be
+            // redundant - already run, against this exact namespace, for
+            // the image this source belongs to (mediaAclPath() is
+            // namespace-wide, not per-file). The event is still fired by
+            // hand though, in the same shape media_delete() builds it, so a
+            // backup plugin watching MEDIA_DELETE_FILE still hears about the
+            // source's removal exactly as it always has - only the
+            // attic/changelog side effects that event usually carries are
+            // skipped, deliberately, by not routing through media_delete().
+            $size = filesize($src_fl);
+            $unl = @unlink($src_fl);
+            if ($unl) io_sweepNS($src_id, 'mediadir');
+
+            $data = ['id' => $src_id, 'name' => basename($src_fl), 'path' => $src_fl, 'size' => $size, 'unl' => $unl, 'del' => false];
+            \dokuwiki\Extension\Event::createAndTrigger('MEDIA_DELETE_FILE', $data, null, false);
+        }
+
+        /**
+         * Fold a diagram source's current XML into the attic copy of the
+         * image core just archived, so the revision left behind is
+         * self-contained instead of split across two files - see
+         * _media_delete_sibling()'s own docblock for why.
+         *
+         * The source, not whatever the image's own bytes already carry: the
+         * two can disagree. Saving one rendering (png/svg) never regenerates
+         * the other (helper.php's sourceID() docblock), so an image's own
+         * embedded XML can be older than the shared .drawio if the *other*
+         * rendering was saved more recently. Reading the .drawio directly is
+         * what this diagram's edit history actually says was current.
+         *
+         * @param string               $media_id the deleted image's id
+         * @param string               $src_fl   path to its .drawio source
+         * @param helper_plugin_drawio $helper
+         */
+        private function _embed_source_into_attic($media_id, $src_fl, $helper) {
+            global $conf;
+            if (empty($conf['mediarevisions'])) return; // core never archives without it
+
+            if (!isset($this->_deletedMtime[$media_id])) return;
+            $atticFl = mediaFN($media_id, $this->_deletedMtime[$media_id]);
+            if (!file_exists($atticFl)) return; // core didn't archive it - nothing to embed into
+
+            $xml = file_get_contents($src_fl);
+            if ($xml === false || $xml === '') return;
+
+            $bytes = file_get_contents($atticFl);
+            if ($bytes === false) return;
+
+            $ext = strtolower(pathinfo($media_id, PATHINFO_EXTENSION));
+            $embedded = ($ext === 'png') ? $helper->embedPngXml($bytes, $xml) : $helper->embedSvgXml($bytes, $xml);
+            if ($embedded === '') return; // malformed image - leave the plain archived copy alone
+
+            $this->_write_file($atticFl, $embedded);
         }
 
         /**
@@ -992,7 +1127,7 @@
          * helper.php's sourceID()) and both read the source that was just
          * written.
          *
-         * Cost: bounded to $reindexPageCap pages, one idx_addPage() call
+         * Cost: bounded to $reindexPageCap pages, one reindexPage() call
          * each, run synchronously inside this ajax request - the same
          * request a user is waiting on to know their diagram saved. A
          * diagram embedded on a handful of pages (the overwhelmingly common
@@ -1020,7 +1155,7 @@
          * Revisit (a real ceiling, not a guess) if a wiki with a diagram
          * shared across hundreds of pages actually shows up.
          *
-         * Failure: every idx_addPage() call is individually wrapped so one
+         * Failure: every reindexPage() call is individually wrapped so one
          * broken page's reindex cannot stop the rest, and the caller wraps
          * this whole method in its own try/catch so nothing in here can
          * turn a successful diagram save into a failed request - the
@@ -1044,13 +1179,23 @@
             }
             if (!$pages) return;
 
+            // Same pages also need their non-xhtml cached renders discarded -
+            // see helper::purgeDiagramPageCache()'s own docblock for why.
+            // Same loop, same cap, same per-page isolation as the reindex
+            // this was bolted onto: a diagram embedded on a handful of pages
+            // is the common case this plugin was built around either way.
             $n = 0;
             foreach (array_keys($pages) as $page) {
                 if (++$n > $this->reindexPageCap) break;
                 try {
-                    idx_addPage($page, false, true);
+                    $helper->reindexPage($page);
                 } catch (\Throwable $e) {
                     // one page's reindex failing must not stop the rest
+                }
+                try {
+                    $helper->purgeDiagramPageCache($page);
+                } catch (\Throwable $e) {
+                    // best effort - see purgeDiagramPageCache()'s docblock
                 }
             }
         }

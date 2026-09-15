@@ -39,11 +39,18 @@ no source file. This is what every diagram on a real wiki looks like today.
 
 The text inside a diagram used to be invisible to search.
 
-  - Search for a word that only exists **inside** a diagram (see the note the
-    coordinator left you for which word to try).
-  - The page holding that diagram should come up.
-  - A diagram in a namespace you may not read is never indexed — its text
-    cannot leak through search.
+The word to try is **''Repesentation''** (misspelled on purpose by whoever drew
+''wiki:sample.png''; it appears nowhere else on this wiki).
+
+  - Search for it **before** you have saved or converted ''wiki:sample.png''
+    (sections 2 and 3). Nothing is found — an old diagram's text only becomes
+    searchable once it has a source.
+  - Now do section 2 or 3, then search again. This page comes up. No manual
+    reindex, no waiting.
+  - The very same diagram also sits in ''secret:hidden.png'', a namespace only
+    admin may read, and it is embedded at the bottom of section 10. Log out and
+    search again: still only this page, found through the public copy — the
+    protected one is never indexed, so its text cannot leak through search.
 
 ===== 5. Two people editing one diagram =====
 
@@ -54,9 +61,14 @@ The text inside a diagram used to be invisible to search.
 
 ===== 6. The source follows its image =====
 
-  - In the media manager, **rename** ''new:plan.png''. ''plan.drawio'' moves with it.
-  - **Delete** a diagram. Its source goes too — no orphans left behind.
-    (DokuWiki keeps deleted media in the attic, so this is recoverable.)
+  - **Delete** a diagram in the media manager. Its source goes too — no
+    orphans left behind. What lands in the attic is the image with the diagram
+    embedded in it, so a restore brings back an editable diagram.
+    (This dev wiki has ''refcheck'' off so you may delete a diagram this page
+    still embeds; a production wiki would refuse with "still in use".)
+  - Renaming is not part of this walkthrough: DokuWiki itself cannot rename
+    media, that needs the third-party move plugin, which the dev image does not
+    carry. The plugin's move handling is covered by the test suite instead.
 
 ===== 7. Sized diagrams download a smaller image =====
 
@@ -83,14 +95,29 @@ The button now works on **either half of the pair**, not just the rendering.
     details, next to Delete and Upload new version.
   - Now pick ''new:plan.drawio'' instead — the same button is there too, and
     opens the very same diagram, not a blank one.
-  - Delete ''new:plan.png'' (keep ''new:plan.drawio''), then select the
-    ''.drawio'' again and click **Edit with draw.io**. It still opens, loaded
-    from the source with no image to show yet — save it and ''new:plan.png''
-    reappears.
+  - Give the diagram a second rendering: open {{drawio>new:plan.svg}} below,
+    save without changing anything, close the editor. The media manager now
+    shows ''plan.png'', ''plan.svg'' and ''plan.drawio'' — the png and svg
+    are two renderings of the same diagram and share that one source.
+  - Delete ''new:plan.svg''. ''new:plan.drawio'' and ''new:plan.png'' both
+    survive: the png is still a rendering that needs the source, so the
+    "delete means delete" cascade from section 6 does not reach it. Select
+    ''new:plan.drawio'' and click **Edit with draw.io** — it opens the same
+    diagram, loaded from the source.
+  - There is no way to reach "only the source is left, no rendering at all"
+    through the UI: deleting the *last* rendering always takes the source
+    with it (section 6) — that state cannot exist, so there is nothing to
+    click through here for it.
+
+{{drawio>new:plan.svg}}
 
 ===== 10. ODT export =====
 
   - [[?do=export_odt&id=whatsnew|Export this page to ODT]] and open it.
     The diagrams are in the document.
-  - A diagram you may not read is never embedded in an export — that was a real
-    hole, found and closed in the audit.
+  - Below is ''secret:hidden.png'', which only admin may read. Logged in as
+    admin you see it here and in the export. **Log out**, reload, and export
+    again: the placeholder shows, and the exported document does **not**
+    contain that diagram. That was a real hole, found and closed in the audit.
+
+{{drawio>secret:hidden.png}}

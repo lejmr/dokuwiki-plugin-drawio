@@ -1,13 +1,11 @@
 <?php
 
 /**
- * Tests for the drawio admin plugin's bulk-conversion task.
- *
- * The task walks the whole media tree, classifies every diagram (already has
- * a source / recoverable from its image / no recoverable XML at all) and,
- * only when explicitly asked to with a POST and a valid security token,
- * writes the missing .drawio sources. It must never overwrite an existing
- * source and never write anything at all on a plain GET.
+ * Tests for the drawio admin plugin's bulk-conversion task, beyond the
+ * golden happy path (golden/lifecycle.test.php's
+ * testConvertsARealPngExportAndFiresTheUploadEvent): admin-only access,
+ * dry-run reporting, CSRF/GET rejection, and the never-overwrite /
+ * never-recover-garbage guarantees.
  *
  * @group plugin_drawio
  * @group plugins
@@ -200,45 +198,10 @@ class admin_plugin_drawio_test extends DokuWikiTest
         $this->assertCount(0, $this->firedEvents);
     }
 
-    /**
-     * A genuine draw.io PNG export (uncompressed tEXt chunk), taken verbatim
-     * from the same fixture helper.test.php uses to prove extraction against
-     * real output rather than a hand-built one.
-     */
-    public function testConvertsARealPngExportAndFiresTheUploadEvent()
-    {
-        $png = file_get_contents(__DIR__ . '/real-drawio-export.png');
-        $this->writeMedia('admintest5:plan.png', $png);
-
-        $helper = plugin_load('helper', 'drawio');
-        $expectedXml = $helper->extractPngXml($png);
-        $this->assertNotSame('', $expectedXml);
-
-        $token = $this->tokenFor('testadmin');
-        $_SERVER['REMOTE_USER'] = 'testadmin';
-        $this->simulateRequest('POST', ['convert' => '1', 'sectok' => $token]);
-        $html = $this->runAdmin();
-
-        $srcFile = mediaFN('admintest5:plan.drawio');
-        $this->assertFileExists($srcFile);
-        $this->assertSame($expectedXml, file_get_contents($srcFile));
-        $this->assertStringContainsString('admintest5:plan.png', $html);
-
-        $events = $this->eventsFor('admintest5:plan.drawio');
-        $this->assertCount(1, $events);
-        [$name, $fl, $id, $mime, $overwrite, $move] = $events[0];
-        $this->assertSame(basename($srcFile), $name);
-        $this->assertSame($srcFile, $fl);
-        $this->assertSame('admintest5:plan.drawio', $id);
-        $this->assertSame('application/xml', $mime);
-        $this->assertFalse($overwrite);
-        $this->assertNull($move);
-    }
-
     /** The non-compliant raw-deflate zTXt export - same fixture helper.test.php covers. */
     public function testConvertsARealPngExportWithNonCompliantZtxt()
     {
-        $png = file_get_contents(__DIR__ . '/real-drawio-export-ztxt.png');
+        $png = file_get_contents(__DIR__ . '/../real-drawio-export-ztxt.png');
         $this->writeMedia('admintest6:plan.png', $png);
 
         $helper = plugin_load('helper', 'drawio');
@@ -256,7 +219,7 @@ class admin_plugin_drawio_test extends DokuWikiTest
     /** The real SVG export fixture - proves the svg extraction path, not just png. */
     public function testConvertsARealSvgExport()
     {
-        $svg = file_get_contents(__DIR__ . '/real-drawio-export.svg');
+        $svg = file_get_contents(__DIR__ . '/../real-drawio-export.svg');
         $this->writeMedia('admintest7:plan.svg', $svg);
 
         $helper = plugin_load('helper', 'drawio');
@@ -302,6 +265,4 @@ class admin_plugin_drawio_test extends DokuWikiTest
         $this->assertCount(0, $this->eventsFor('admintest9:plan.drawio'));
         $this->assertStringContainsString('admintest9:plan.png', $html);
     }
-
 }
-

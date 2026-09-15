@@ -38,7 +38,8 @@ jobs:
         # node ships on the runner; script.js is plain browser JS, no build step
         run: |
           node --check script.js
-          node _test/script.test.js
+          node _test/golden/script.test.js
+          node _test/extra/script.test.js
 
   tests:
     name: tests (DokuWiki ${{ matrix.dokuwiki }})
@@ -53,5 +54,7 @@ jobs:
         with:
           php-version: '8.3'
           extensions: dom, json, mbstring
-      - name: PHPUnit
+      - name: PHPUnit (golden - fast fail)
+        run: bin/run-tests.sh ${{ matrix.dokuwiki }} golden
+      - name: PHPUnit (full suite)
         run: bin/run-tests.sh ${{ matrix.dokuwiki }}
