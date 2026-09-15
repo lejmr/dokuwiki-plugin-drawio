@@ -110,6 +110,12 @@ function edit_cb(image)
         document.body.removeChild(iframe);
     };
     
+    // The xml the editor sends with its 'save' event, kept until the 'export'
+    // event that follows it so the save request can carry the source as well
+    // as the picture. It used to be used for the draft and then dropped, which
+    // left the exported image as the only copy of the diagram's source.
+    var pendingXml = null;
+
     var draft = localStorage.getItem('.draft-' + currentDiagramId);
 
     // Prefer the draft from browser cache
@@ -180,19 +186,32 @@ function edit_cb(image)
                 }
                 else // get local image
                 {                    
+                    // data.xml is the diagram's stored source (ns:plan.drawio),
+                    // present whenever the server has one that is not older than
+                    // the image - load the editor straight from it. Without one
+                    // (every diagram saved before this existed, until its next
+                    // save) fall back to making drawio dig the xml back out of
+                    // the exported image, which is what it always did and what
+                    // loses the diagram the moment anything rewrites that file.
+                    var load = function (data, imageKey) {
+                        var msg = {action: 'load', autosave: 1};
+                        if (data.xml) {
+                            msg.xml = data.xml;
+                        } else {
+                            msg[imageKey] = data.content;
+                        }
+                        iframe.contentWindow.postMessage(JSON.stringify(msg), '*');
+                    };
                     if (imageFormat == 'png')
                     {
                         drawioPost('get_png', imagePointer.getAttribute('id'), null, function (data) {
-                            iframe.contentWindow.postMessage(JSON.stringify({action: 'load',
-                                autosave: 1, xmlpng: data.content}), '*');
+                            load(data, 'xmlpng');
                         });
                     }
                     else if (imageFormat == 'svg')
                     {
                         drawioPost('get_svg', imagePointer.getAttribute('id'), null, function (data) {
-                            //var svg = new XMLSerializer().serializeToString(data.content.firstChild);
-                            iframe.contentWindow.postMessage(JSON.stringify({action: 'load',
-                                autosave: 1, xml: data.content}), '*');
+                            load(data, 'xml');
                         });
                     }
 					else {
@@ -255,7 +274,12 @@ function edit_cb(image)
                 // extension, bad payload, no permission), the user's change would
                 // exist nowhere at all - not on disk, not in the draft - and that
                 // is exactly the case the draft exists to cover.
-                drawioPost('save', imagePointer.getAttribute('id'), { content: msg.data }, null, true)
+                var payload = { content: msg.data };
+                // Omitted, not sent empty, when there is no xml to send: the
+                // server treats a missing 'xml' as "this caller has no source"
+                // and saves the image alone, exactly as before.
+                if (pendingXml) payload.xml = pendingXml;
+                drawioPost('save', imagePointer.getAttribute('id'), payload, null, true)
                 .done(function() {
                     localStorage.removeItem('.draft-' + currentDiagramId);
                     draft = null;
@@ -292,6 +316,7 @@ function edit_cb(image)
             else if (msg.event == 'save')
             {
                 
+                pendingXml = msg.xml;
                 if (imageFormat === 'png')
                 {
                     iframe.contentWindow.postMessage(JSON.stringify({action: 'export',
