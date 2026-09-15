@@ -1,9 +1,26 @@
 // Embeded editor
-var drawIoEditor= JSINFO['plugin_drawio']['url'] + '?embed=1&ui=atlas&spin=1&proto=json';
-var toolbarPossibleExtension=JSINFO['plugin_drawio']['toolbar_possible_extension'];
+//
+// JSINFO['plugin_drawio'] is populated by action.php's addjsinfo(), hooked to
+// DOKUWIKI_STARTED/MEDIAMANAGER_STARTED - not every page fires one of those
+// (fixes #16). DokuWiki concatenates every plugin's script.js into a single
+// response (js_pluginscripts() in lib/exe/js.php), so a top-level throw here
+// used to abort that whole bundle and silently break every plugin script
+// that happened to sort after "drawio" in it. Nothing below may run at
+// parse/load time without checking drawioConf() first.
+function drawioConf() {
+    return (typeof JSINFO !== 'undefined' && JSINFO['plugin_drawio']) ? JSINFO['plugin_drawio'] : null;
+}
+var toolbarPossibleExtension = drawioConf() ? drawioConf()['toolbar_possible_extension'] : [];
 var initial = null;
 var currentDiagramId = null;
 var imagePointer = null;
+// guards against a second click stacking a second iframe + 'message' listener
+// on top of an already-open editor (every autosave would then fire duplicate
+// draft_save requests for the rest of the session).
+// known gap: if the iframe never loads at all (ad blocker, a corporate proxy
+// blocking diagrams.net) this stays stuck true with no cancel affordance -
+// not fixed here, needs a real UI (e.g. a close button/timeout on the iframe).
+var editorOpen = false;
 
 function edit(image)
 {   
@@ -25,10 +42,16 @@ function edit(image)
 
 function edit_cb(image)
 {
-    var zIndex = 999;
-    if(JSINFO && JSINFO['plugin_drawio']){
-        zIndex = JSINFO['plugin_drawio']['zIndex'];
+    var conf = drawioConf();
+    if (!conf) {
+        console.log('drawio: plugin_drawio config missing from JSINFO, cannot open editor');
+        return;
     }
+    if (editorOpen) {
+        // ignore the click rather than layering a second editor on top
+        return;
+    }
+    var zIndex = conf['zIndex'];
 
     imagePointer = image;
     currentDiagramId = imagePointer.getAttribute('id');
@@ -47,10 +70,12 @@ function edit_cb(image)
     iframe.setAttribute('frameborder', '0');
     iframe.setAttribute('class', 'drawio');
     iframe.setAttribute('style', 'z-index: ' + zIndex + ';');
+    editorOpen = true;
 
     var close = function()
     {
         window.removeEventListener('message', receive);
+        editorOpen = false;
         document.body.removeChild(iframe);
     };
     
@@ -105,9 +130,27 @@ function edit_cb(image)
     
     var receive = function(evt)
     {
+        // the listener is on window, not the iframe, so without this any script
+        // on the page (not just the draw.io iframe) could post a synthesised
+        // {"event":"save",...} and have it acted on. A string origin check
+        // breaks the moment a redirect/reverse proxy/SSO gateway sits in front
+        // of a self-hosted draw.io (the 'url' setting supports that) - compare
+        // identity instead, same as drawio's own reference integration
+        // (jgraph/drawio-integration, examples/embed-mode/diagram-editor.js).
+        if (evt.source !== iframe.contentWindow) return;
         if (evt.data.length > 0)
         {
-            var msg = JSON.parse(evt.data);
+            var msg;
+            try {
+                msg = JSON.parse(evt.data);
+            } catch (e) {
+                // a partial message during load, a heartbeat, a protocol hiccup -
+                // an unguarded throw here would abort before close() ever runs,
+                // leaving editorOpen stuck true and the diagram uneditable until
+                // a reload (same fix the reference integration applies)
+                console.log('drawio: ignoring non-JSON postMessage', e);
+                return;
+            }
 			// wait for init msg
             if (msg.event == 'init')
             {
@@ -163,8 +206,6 @@ function edit_cb(image)
                 {
                     imgData = msg.data ;
                     image.setAttribute('src', imgData);
-                    imgSrc=image.getAttribute('src');
-                    imgSrc=imgSrc.replace('plugins/drawio/blank-image.png','exe/fetch.php?media=');
                 }
                 else if (msg.format == 'svg') 
                 {
@@ -182,36 +223,53 @@ function edit_cb(image)
                     trElement.style.textAlign = "center" ;
                 }
                 
-                localStorage.removeItem('.draft-' + currentDiagramId);
-                draft = null;
 				close();
 
-                // Save into dokuwiki
+                // Save into dokuwiki. The image above was already updated to look
+                // saved and the editor already closed - the draft (localStorage +
+                // on-disk) is the only thing that still says otherwise, so it must
+                // only be cleared once the save is confirmed to have worked. If it
+                // were cleared up front and the server then rejected the save (bad
+                // extension, bad payload, no permission), the user's change would
+                // exist nowhere at all - not on disk, not in the draft - and that
+                // is exactly the case the draft exists to cover.
                 jQuery.post(
                     DOKU_BASE + 'lib/exe/ajax.php',
                     {
-                        call: 'plugin_drawio', 
+                        call: 'plugin_drawio',
                         imageName: imagePointer.getAttribute('id'),
                         content: msg.data,
                         action: 'save'
                     }
-                );
+                ).done(function() {
+                    localStorage.removeItem('.draft-' + currentDiagramId);
+                    draft = null;
 
-                // Remove all draft files
-                jQuery.post(
-                    DOKU_BASE + 'lib/exe/ajax.php',
-                    {
-                        call: 'plugin_drawio', 
-                        imageName: imagePointer.getAttribute('id'),
-                        action: 'draft_rm'
-                    }
-                );
-                
-                // Clean cache of this page
-                var url = new URL(window.location.href);
-                url.searchParams.set('purge', 'true');
-                jQuery.get(url);
-                
+                    // Remove all draft files - best-effort scratch-file cleanup,
+                    // not worth alerting over; a failure here just means a stale
+                    // draft lingers (offering to restore it next time this
+                    // diagram opens).
+                    jQuery.post(
+                        DOKU_BASE + 'lib/exe/ajax.php',
+                        {
+                            call: 'plugin_drawio',
+                            imageName: imagePointer.getAttribute('id'),
+                            action: 'draft_rm'
+                        }
+                    ).fail(function() {
+                        console.log('drawio: draft_rm failed, a stale draft may linger');
+                    });
+                }).fail(function() {
+                    // Draft is untouched on purpose (see above) - draft_get will
+                    // offer it back next time this diagram is opened. Reload is
+                    // still fine here: alert() is modal (the user has dismissed it
+                    // before reload runs), and nothing else touches the draft on
+                    // this path - only the .done() branch above does, and that
+                    // never runs when we're here.
+                    alert('Saving the diagram failed - your change was NOT saved, but ' +
+                        'was kept as a draft. Reopen this diagram to get it back.');
+                    window.location.reload();
+                });
             }
             else if (msg.event == 'autosave')
             {
@@ -278,7 +336,7 @@ function edit_cb(image)
         }
     };
     window.addEventListener('message', receive);
-    iframe.setAttribute('src', drawIoEditor);
+    iframe.setAttribute('src', conf['url'] + '?embed=1&ui=atlas&spin=1&proto=json');
     document.body.appendChild(iframe);
 };
 
@@ -342,6 +400,57 @@ if (typeof window.toolbar !== 'undefined') {
                 close: ""
             };
         }
-        
+
     }
 };
+
+
+// Media manager: "Edit with draw.io" button (maintainer request, issue #16
+// context) - a diagram no page references cannot otherwise be edited at all.
+// Core builds the file detail panel's action buttons directly in
+// media_preview_buttons() (inc/media.php) with no event to extend them, and
+// that panel is loaded both by a direct page load (?do=media&image=...) and
+// by ajax (lib/scripts/media.js replaces div.file's content). So this reacts
+// to the DOM instead, re-running after every ajax call, and reuses edit() -
+// which already checks 'get_auth' server-side - rather than duplicating the
+// editor-opening logic or auth logic here.
+function drawioAddMediaManagerButton() {
+    var conf = drawioConf();
+    if (!conf) return;
+
+    jQuery('.drawio__mmbtn').remove();
+
+    // inc/template.php's tpl_mediaFileDetails() always prints the raw media id
+    // as this link's text (unlike the tabs, which aren't links at all for
+    // whichever tab is currently selected) - this is the one place it's
+    // reliably available regardless of file type or config.
+    var $header = jQuery('div.file .panelHeader a.mediafile').first();
+    if (!$header.length) return;
+    var mediaId = jQuery.trim($header.text());
+    if (!mediaId) return;
+
+    var ext = mediaId.split('.').pop();
+    if (conf['toolbar_possible_extension'].indexOf(ext) === -1) return;
+
+    var $img = jQuery('div.file div.image img').first();
+    if (!$img.length) return;
+    $img.attr('id', mediaId);
+
+    var $li = jQuery('<li class="drawio__mmbtn"></li>');
+    var $link = jQuery('<a href="#"></a>').text(conf['editbutton']);
+    $link.on('click', function (e) {
+        e.preventDefault();
+        edit($img[0]);
+    });
+    $li.append($link);
+    jQuery('div.file ul.actions').append($li);
+}
+
+// guarded: the test sandboxes in _test/script.test.js don't stub a real
+// jQuery, and script.js must still load harmlessly there (see #16 above)
+if (typeof jQuery === 'function') {
+    jQuery(function () {
+        drawioAddMediaManagerButton();
+        jQuery(document).ajaxComplete(drawioAddMediaManagerButton);
+    });
+}
