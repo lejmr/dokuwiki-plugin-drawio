@@ -10,6 +10,7 @@
 /bin export-ignore
 /_test export-ignore
 /.github export-ignore
+/.claude export-ignore
 /DEVELOPMENT.md export-ignore
 /REVIEW.md export-ignore
 /docker-compose.yaml export-ignore
