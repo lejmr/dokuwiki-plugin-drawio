@@ -229,6 +229,15 @@ class action_plugin_drawio_data_delta_test extends DokuWikiTest
         $dataRoot = rtrim(dirname($conf['datadir']), '/') . '/';
         $odtCacheRel = substr($odtCache->cache, strlen($dataRoot));
         $cachePrefixRel = substr($odtCache->cache, strlen($dataRoot), -strlen('.odt'));
+        // The metadata cache is keyed differently from every other renderer
+        // cache (CacheRenderer::getEnvironmentKey() adds DOKU_BASE for all
+        // modes but 'metadata'), so its prefix is not $cachePrefixRel.
+        // Indexer::addPage() has p_get_metadata() write time() into it -
+        // which only shows up as a change when a second boundary falls
+        // between the snapshot and the save, hence a flaky CI failure
+        // before this was pinned by its own name.
+        $metaCache = new \dokuwiki\Cache\CacheRenderer('deltapage', $file, 'metadata');
+        $metaCacheRel = substr($metaCache->cache, strlen($dataRoot));
 
         $this->assertDelta(
             $before,
@@ -240,19 +249,18 @@ class action_plugin_drawio_data_delta_test extends DokuWikiTest
                 'media_meta/delta/withpage.png.changes',
                 'meta/_media.changes', // see testSavingANewDiagramWritesExactlyImageSourceAndChangelogs()'s comment on this same path
                 'index/*',
+                $metaCacheRel,
             ],
             // modified
             [
                 'meta/_media.changes',
                 'meta/deltapage.meta',
                 'index/*',
-                // DokuWiki master's Indexer::addPage() also touches this
-                // page's own instructions/metadata cache entry, which
-                // stable/oldstable's idx_addPage() does not - core's own
-                // cache naming (same CacheParser prefix purgeDiagramPageCache()
-                // already computes for the deleted bucket below), so this is
-                // pinned to that one page's prefix, not "any cache file".
-                $cachePrefixRel . '.metadata',
+                // Indexer::addPage() (helper::reindexPage()) has this page's
+                // metadata re-rendered, which touches its own metadata cache
+                // entry - pinned to that one page's own cache name, not "any
+                // cache file", so a purge that reaches too far still fails.
+                $metaCacheRel,
             ],
             // deleted - only this page's own cached, non-xhtml renders
             // (odt here; some DokuWiki versions cache more than one format
