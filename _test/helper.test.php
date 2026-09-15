@@ -271,4 +271,144 @@ class helper_plugin_drawio_test extends DokuWikiTest
         $this->assertStringStartsWith('<mxfile', $xml);
         $this->assertTrue($this->helper->isDiagramXml($xml));
     }
+
+    // --- otherRenderingID() -------------------------------------------
+    //
+    // The "one diagram, two renderings" identity, used by action.php's
+    // delete/rename cascade to decide whether a shared .drawio source may
+    // still be needed under a rendering's old name.
+
+    public function testOtherRenderingIdSwapsPngAndSvg()
+    {
+        $this->assertSame('ns:plan.svg', $this->helper->otherRenderingID('ns:plan.png'));
+        $this->assertSame('ns:plan.png', $this->helper->otherRenderingID('ns:plan.svg'));
+        $this->assertSame('a:b:c.svg', $this->helper->otherRenderingID('a:b:c.PNG'));
+    }
+
+    public function testOtherRenderingIdRefusesNonDiagrams()
+    {
+        $this->assertSame('', $this->helper->otherRenderingID('ns:plan.drawio'));
+        $this->assertSame('', $this->helper->otherRenderingID('ns:plan.php'));
+        $this->assertSame('', $this->helper->otherRenderingID(''));
+    }
+
+    // --- diagramIndexText() --------------------------------------------
+    //
+    // The text the search index gets out of a diagram's stored XML. draw.io
+    // stores each <diagram> element's content either as plain XML or as
+    // base64(deflate_raw(encodeURIComponent(xml))) - both forms appear in
+    // real exports (this branch's own real-drawio-export.svg fixture uses
+    // the plain form; real-drawio-export.png and real-drawio-export-ztxt.png
+    // both use the compressed form), and a label's text arrives HTML-escaped
+    // and, for anything past a single line, carrying real markup.
+
+    /** Build a one-page .drawio file with a single labelled cell, uncompressed. */
+    protected function plainDrawio($label = 'Firewall')
+    {
+        return '<mxfile host="embed"><diagram id="p1" name="Page-1">'
+            . '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>'
+            . '<mxCell id="2" value="' . htmlspecialchars($label, ENT_QUOTES) . '" vertex="1" parent="1">'
+            . '<mxGeometry/></mxCell></root></mxGraphModel>'
+            . '</diagram></mxfile>';
+    }
+
+    /** The same, but with the <diagram> content compressed the way a real export does it. */
+    protected function compressedDrawio($label = 'Firewall')
+    {
+        $inner = '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>'
+            . '<mxCell id="2" value="' . htmlspecialchars($label, ENT_QUOTES) . '" vertex="1" parent="1">'
+            . '<mxGeometry/></mxCell></root></mxGraphModel>';
+        $payload = base64_encode(gzdeflate(rawurlencode($inner), 9));
+        return '<mxfile host="embed"><diagram id="p1" name="Page-1">' . $payload . '</diagram></mxfile>';
+    }
+
+    public function testDiagramIndexTextExtractsAPlainLabel()
+    {
+        $this->assertSame('Firewall', $this->helper->diagramIndexText($this->plainDrawio('Firewall')));
+    }
+
+    /**
+     * The compressed form is the common one in the wild (see this file's own
+     * real-drawio-export.png fixture) - base64, then raw deflate (gzinflate(),
+     * not gzuncompress() - no zlib header), then URL-decoded.
+     */
+    public function testDiagramIndexTextExtractsACompressedLabel()
+    {
+        $this->assertSame('Firewall', $this->helper->diagramIndexText($this->compressedDrawio('Firewall')));
+    }
+
+    /**
+     * A multi-line label is HTML-escaped markup, not plain text - draw.io
+     * itself produces "&lt;div&gt;JavaScript&lt;/div&gt;&lt;div&gt;Source
+     * Code&lt;br&gt;&lt;/div&gt;" for a two-line label (verified against this
+     * branch's real-drawio-export.png fixture). The tags must be stripped and
+     * the entities decoded, so what lands in the index is words, not markup.
+     */
+    public function testDiagramIndexTextStripsMarkupAndDecodesEntities()
+    {
+        $xml = '<mxfile><diagram>'
+            . '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>'
+            . '<mxCell id="2" value="&lt;div&gt;JavaScript&lt;/div&gt;&lt;div&gt;Source Code&lt;br&gt;&lt;/div&gt;" vertex="1" parent="1"/>'
+            . '</root></mxGraphModel></diagram></mxfile>';
+        $text = $this->helper->diagramIndexText($xml);
+        $this->assertStringNotContainsString('<div>', $text);
+        $this->assertStringContainsString('JavaScript', $text);
+        $this->assertStringContainsString('Source Code', $text);
+    }
+
+    /** A diagram can have more than one page; every page's labels count. */
+    public function testDiagramIndexTextCollectsEveryPage()
+    {
+        $xml = '<mxfile>'
+            . '<diagram id="p1"><mxGraphModel><root><mxCell value="Alpha" vertex="1"/></root></mxGraphModel></diagram>'
+            . '<diagram id="p2"><mxGraphModel><root><mxCell value="Bravo" vertex="1"/></root></mxGraphModel></diagram>'
+            . '</mxfile>';
+        $text = $this->helper->diagramIndexText($xml);
+        $this->assertStringContainsString('Alpha', $text);
+        $this->assertStringContainsString('Bravo', $text);
+    }
+
+    public function testDiagramIndexTextReturnsEmptyForNonDiagramXml()
+    {
+        $this->assertSame('', $this->helper->diagramIndexText('<html><body>nope</body></html>'));
+        $this->assertSame('', $this->helper->diagramIndexText(''));
+    }
+
+    /**
+     * The bound: a huge diagram must not make one page's indexed text
+     * unbounded. Verified with a genuinely huge label (well past the cap),
+     * not just an assertion on a made-up small number.
+     */
+    public function testDiagramIndexTextIsCapped()
+    {
+        $huge = str_repeat('word ', 10000); // 50000 chars of real words
+        $text = $this->helper->diagramIndexText($this->plainDrawio($huge));
+        $this->assertLessThanOrEqual(20000, strlen($text));
+    }
+
+    /**
+     * A crafted deflate stream that expands to far more than the cap must
+     * not be inflated in full before being discarded - that is a memory
+     * exhaustion vector for a .drawio placed directly in data/media (the
+     * 2 MiB save-time cap in action.php only bounds what this plugin itself
+     * writes). A few KB of repeated bytes compress to a tiny stream but
+     * inflate to many megabytes; this must return quickly and safely rather
+     * than pull all of it into memory.
+     */
+    public function testDiagramIndexTextSurvivesADecompressionBomb()
+    {
+        $bomb = base64_encode(gzdeflate(str_repeat('A', 6 * 1024 * 1024), 9));
+        $xml = '<mxfile><diagram id="p1">' . $bomb . '</diagram></mxfile>';
+        $text = @$this->helper->diagramIndexText($xml);
+        $this->assertSame('', $text, 'an oversized decompression must be discarded, not indexed');
+    }
+
+    /** Genuine draw.io output, not a hand-built fixture - proves the real shape parses. */
+    public function testDiagramIndexTextExtractsFromARealExport()
+    {
+        $png = file_get_contents(__DIR__ . '/real-drawio-export.png');
+        $xml = $this->helper->extractPngXml($png);
+        $text = $this->helper->diagramIndexText($xml);
+        $this->assertNotSame('', $text, 'a real export must yield indexable text');
+    }
 }
