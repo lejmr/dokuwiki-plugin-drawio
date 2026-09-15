@@ -5,7 +5,7 @@ written for someone running the plugin, not for someone patching its code —
 see the pull requests linked from each release on GitHub for the technical
 detail.
 
-## [2026-09-14]
+## [2026-09-15]
 
 The first release to come out of an actual release process. It carries a
 long backlog of fixes plus three larger pieces of work: diagrams now keep
@@ -32,6 +32,20 @@ holes, and editing got noticeably safer for more than one person at a time.
   entirely since the diagram's own security check needed a per-viewer
   decision; that check no longer needs one, so ordinary DokuWiki caching
   applies again.
+- Diagram text is searchable: the labels of a diagram are indexed with the
+  pages that embed it, and a save re-indexes those pages straight away.
+- Sized diagrams (`{{drawio>plan?200}}`) download a resized copy instead of
+  shrinking the full image in the browser.
+- Settings: `ui` picks the editor's interface (`kennedy`, `min`, `atlas`,
+  `dark`, `sketch`, `simple`); `edit_button` shows an "Edit with draw.io"
+  button under every diagram; `top_offset` pushes the editor down under a
+  template's fixed top navbar (#50).
+- Viewing a page "at" a time (`?at=<timestamp>`) shows the diagram as it
+  was at that time, like DokuWiki does for images.
+- Deleting a diagram's image deletes its source too; the deleted revision
+  is archived to the media attic as the image with the XML embedded, so a
+  restore brings the diagram back editable. Renaming with the move plugin
+  moves the source along.
 
 ### Fixed
 
@@ -46,6 +60,19 @@ holes, and editing got noticeably safer for more than one person at a time.
 - ODT export existed but wasn't reachable from the interface (#7).
 - The plugin was breaking other plugins' JavaScript in the media manager
   (#16).
+- ...and on any page without `JSINFO` at all, such as the Snippets plugin's
+  popup (#37).
+- A large diagram could not be saved when the browser's local storage was
+  full (#32, #57).
+- An empty diagram saved by draw.io (a 1×1 px image) could never be opened
+  again - every diagram now keeps a minimum clickable area (#62).
+- A diagram using mathematical typesetting could not be saved as SVG (#49).
+- ODT export was cached per page rather than per viewer, so the first
+  export decided what every later exporter got.
+- The placeholder image shipped with the plugin carried a stray draw.io
+  diagram since 2020.
+- Diagram names containing dots would not open (adopted from the
+  Thulium-Drake fork).
 
 ### Security
 
