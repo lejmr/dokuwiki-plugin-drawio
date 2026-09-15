@@ -20,6 +20,51 @@ The strong model is only needed for two things: writing the validation
 plan (step 1) and the final consistency pass. Everything else is
 executing instructions and reporting literal output.
 
+## Step zero: from a vague request to exact outputs - nothing is built before this
+
+Every request arrives vague: "search should work", "make diagrams
+interactive", "fix the fork's issue". The lesson of September 2026 is that
+the work must not start from that sentence. It starts from an **acceptance
+table** that turns the sentence into outputs a shell command or a click can
+contradict, and everything downstream - the brief, the golden tests, the
+validation steps, the maintainer's batch - is derived row by row from it.
+
+| # | Behaviour (one sentence, user's words) | How it is observed | Expected literal output | Checked by |
+|---|---|---|---|---|
+| 1 | Words drawn in a diagram are found by wiki search | `curl "$W/doku.php?do=search&q=<label>"` after saving through the plugin's own ajax `save`, no reindex by hand | body contains `id=<embedding page>` | machine (M4) |
+| 2 | Opening a diagram from the media manager works on the `.drawio` too | headless Chrome on `?do=media&image=ns:plan.drawio` | `<button …>Edit with draw.io` inside `ul.actions`, 0 console errors | machine (M3) |
+| 3 | Two people editing one diagram are warned | second window opens the same diagram | editor shows "edited by admin" | maintainer (batch) |
+
+Rules for the table:
+
+- **One row per behaviour the user would notice**, in the user's words, not
+  the implementation's ("links inside the diagram are clickable", not "emit
+  data-mxgraph").
+- **The expected output is literal**: a string in a body, an element in the
+  DOM, a file that exists with a given sha, a status code, a runner's `OK`
+  line. "Works", "is displayed", "is correct" are not outputs.
+- **The observation names the exact command or click**, from a fresh
+  container, with nothing planted. If a row cannot be observed that way,
+  the row is wrong, not the environment - rewrite it until it can.
+- **Every row is assigned**: machine (which validation phase) or maintainer
+  (which batch step). Maintainer rows are only those that need the real
+  editor; everything else is machine.
+- **Negative rows exist too** - what must NOT happen (anonymous export
+  does not contain the restricted diagram; a page without the feature
+  loads no extra script; the HTML is byte-identical for every viewer).
+- The table is shown to the maintainer together with the decision list
+  (flow step 1). His "ok" on the table is the specification; a row he
+  strikes is out of scope; a row he adds is in. After that it does not
+  change silently - a change to the table is a message to him.
+- **Golden tests are the machine rows, one to one.** A row without a test
+  is a missing test; a test without a row is testing the implementation.
+- The validation plan's new steps are the machine rows with their
+  commands; the batch page is the maintainer rows with their "Good =".
+
+If a request cannot be turned into rows, it is not ready to be built -
+say so and ask the one question that unblocks it, instead of guessing and
+building something that only looks done.
+
 ## Roles (may be different agents; must be different roles)
 
 | Role | Does | Must not |
@@ -99,9 +144,12 @@ This is the whole path, in order. Nothing is skipped because "it's small".
    decisions only the maintainer can make (each with a recommendation).
    The maintainer answers once; those answers are recorded in the brief.
    A feature is frozen while a validation batch is open (rule 8).
-2. **Brief + validation plan** (planner). One brief per implementer; a
-   validation-plan delta for the executor (new M-steps with command,
-   expected literal evidence, stop-or-not). Independent topics get
+2. **Acceptance table + brief + validation plan** (planner). The
+   acceptance table (step zero) comes first and is agreed with the
+   maintainer; then one brief per implementer that carries the table's
+   rows as the definition of done, and a validation-plan delta for the
+   executor (the machine rows with command, expected literal evidence,
+   stop-or-not). Independent topics get
    independent implementers in their own worktrees, in parallel.
 3. **Implement** (implementer): code, golden + extra tests, mutation
    check, three DokuWiki branches, both JS tiers, browser rule if it
@@ -167,6 +215,8 @@ This is the whole path, in order. Nothing is skipped because "it's small".
 Repo, worktree instructions (own worktree from origin/master), files to read first
 (DEVELOPMENT.md, REVIEW.md, the modules touched).
 Task: <issue numbers + one paragraph of the user-visible behaviour>.
+Definition of done: the acceptance table rows assigned to you, verbatim - each
+becomes one golden test; report each row with its literal output.
 Root cause, not symptom: grep every caller before editing the shared path.
 Deliver: code + golden test per behaviour + extra tests; run
 `bin/test.sh stable|master|oldstable`, both JS tiers, mutation check.
