@@ -594,3 +594,45 @@ console.log('OK: clicking the button opens the editor via edit(), same as before
 }
 
 console.log("OK: clicking the button on a .drawio source resolves to its rendering, same as before");
+
+// --- regression test for #32/#57: a full localStorage must not break save -
+//
+// A large diagram makes localStorage.setItem() throw QuotaExceededError.
+// Before drawioLocalStorageSet()'s try/catch, that throw escaped the
+// postMessage handler mid-way through the 'save' event, so the export
+// message never reached the iframe and the server-side 'save' post (the
+// durable copy - draft_save's ajax call) never happened either: "Updating
+// page..." then nothing.
+{
+    const { sandbox, messageListeners, iframes, postCalls } = buildSandbox();
+    loadScript(sandbox);
+
+    const quotaError = new Error('QuotaExceededError');
+    quotaError.name = 'QuotaExceededError';
+    sandbox.localStorage.setItem = () => { throw quotaError; };
+
+    sandbox.edit_cb(makeImage('full.png'));
+    const receive = messageListeners[messageListeners.length - 1];
+    const source = iframes[iframes.length - 1].contentWindow;
+
+    assert.doesNotThrow(
+        () => receive({ source, data: JSON.stringify({ event: 'save', xml: '<mxGraphModel>a</mxGraphModel>' }) }),
+        'a full localStorage must not throw out of the save handler',
+    );
+
+    const draftSaveCall = postCalls.find((c) => c.data && c.data.action === 'draft_save');
+    assert.ok(draftSaveCall,
+        'the server-side draft_save must still be posted even though the local write failed');
+
+    assert.doesNotThrow(
+        () => receive({
+            source,
+            data: JSON.stringify({ event: 'export', format: 'xmlpng', data: 'data:image/png;base64,Zm9v' }),
+        }),
+        'a later export/save must still work after a local write failure',
+    );
+    const saveCall = postCalls.find((c) => c.data && c.data.action === 'save');
+    assert.ok(saveCall, "the diagram must still be saved to the server ('save' action) despite the quota error");
+}
+
+console.log('OK: a full localStorage (QuotaExceededError) does not break save/autosave (#32/#57)');
