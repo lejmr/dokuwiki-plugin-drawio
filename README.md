@@ -73,3 +73,21 @@ In order to enable svg drawing support make sure:
 * You have installed [svgEmbed Plugin](https://www.dokuwiki.org/plugin:svgembed#Uploading_SVG_files_via_Media_Manager)
 * You enabled svg extension in DokuWiki's Draw.io configuration 
 * You added `svg image/svg+xml` line to conf/mime.local.conf
+
+## A diagram's identity is its name, not its extension
+
+`ns:plan.png` and `ns:plan.svg` are two *renderings* of one diagram, not two
+diagrams that happen to share a name. The extension only says which format an
+image is exported as; both formats are read from and saved to the same XML
+source (`ns:plan.drawio`), so editing either one edits that diagram, and
+saving either overwrites the shared source. Saving one format never creates
+or touches the other format's image file - a stale sibling image just stays
+stale until someone next saves in that format.
+
+**The one hazard this creates:** if a wiki already has `plan.png` and
+`plan.svg` as two genuinely *different* diagrams (drawn before this plugin
+stored a shared source, so each only has its XML embedded in its own image),
+that difference is silently merged the first time either one is next saved -
+whichever is saved first becomes `plan.drawio`, and both formats open from it
+from then on. The plugin has no way to detect this case from the file bytes
+alone; rename one of the two diagrams first if your wiki has this shape.

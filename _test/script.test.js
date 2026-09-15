@@ -457,3 +457,71 @@ console.log('OK: every ajax call carries the DokuWiki security token (sectok)');
 }
 
 console.log('OK: SVG export does not inject raw markup into the page (S6)');
+
+// --- the diagram source must travel with the save, and be preferred on open
+//
+// The editor hands script.js the diagram XML on its 'save' event and the
+// exported image on the following 'export' event. The XML used to be dropped
+// on the floor, so the only copy of the source was whatever the exporter
+// buried inside the image - lost the moment anything rewrote that file. The
+// save post must carry it, and the open path must load the source the server
+// returns rather than re-parsing the image.
+{
+    const { sandbox, messageListeners, iframes, postCalls } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('source.png'));
+    const receive = messageListeners[messageListeners.length - 1];
+    const source = iframes[iframes.length - 1].contentWindow;
+
+    const xml = '<mxfile host="embed"><diagram>source of truth</diagram></mxfile>';
+    receive({ source, data: JSON.stringify({ event: 'save', xml }) });
+    receive({
+        source,
+        data: JSON.stringify({ event: 'export', format: 'xmlpng', data: 'data:image/png;base64,Zm9v' }),
+    });
+
+    const saveCall = postCalls.find((c) => c.data && c.data.action === 'save');
+    assert.ok(saveCall, "the 'export' handler must post action:'save'");
+    assert.strictEqual(saveCall.data.xml, xml,
+        "the save post must carry the diagram XML, not just the exported image");
+}
+
+console.log('OK: saving a diagram sends its XML source alongside the image');
+
+// the open path: when the server has a source, load from it; otherwise fall
+// back to the old xmlpng/xmlsvg extraction so existing diagrams keep working
+function loadMessageFor(serverReply, imageId, ext) {
+    const { sandbox, messageListeners, iframes, postCalls } = buildSandbox();
+    sandbox.JSINFO.plugin_drawio.toolbar_possible_extension = [ext];
+    loadScript(sandbox);
+
+    const posted = [];
+    sandbox.edit_cb(makeImage(imageId));
+    const receive = messageListeners[messageListeners.length - 1];
+    const frame = iframes[iframes.length - 1];
+    frame.contentWindow.postMessage = (m) => posted.push(JSON.parse(m));
+
+    receive({ source: frame.contentWindow, data: JSON.stringify({ event: 'init' }) });
+    const getCall = postCalls.find((c) => c.data && /^get_(png|svg)$/.test(c.data.action));
+    assert.ok(getCall && getCall.successCb, 'init must ask the server for the diagram');
+    getCall.successCb(serverReply);
+    return posted[posted.length - 1];
+}
+
+{
+    const xml = '<mxfile><diagram>from the source file</diagram></mxfile>';
+    const msg = loadMessageFor({ content: 'data:image/png;base64,Zm9v', xml }, 'hassource.png', 'png');
+    assert.strictEqual(msg.action, 'load');
+    assert.strictEqual(msg.xml, xml, 'the editor must be loaded from the source XML');
+    assert.strictEqual(msg.xmlpng, undefined, 'the image must not be re-parsed when a source exists');
+
+    const legacy = loadMessageFor({ content: 'data:image/png;base64,Zm9v' }, 'nosource.png', 'png');
+    assert.strictEqual(legacy.xmlpng, 'data:image/png;base64,Zm9v',
+        'a diagram with no source must still open from its image');
+
+    const svg = loadMessageFor({ content: 'data:image/svg+xml;base64,Zm9v', xml }, 'has.svg', 'svg');
+    assert.strictEqual(svg.xml, xml, 'an svg diagram must prefer its source too');
+}
+
+console.log('OK: opening a diagram prefers the source file and falls back to the image');

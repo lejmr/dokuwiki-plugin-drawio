@@ -129,3 +129,68 @@ installed and enabled here - nothing to set up.
   - ''?linkonly'' diagrams (section 6) are embedded as images here too: a
     printed document has no editor to click, so showing nothing would be
     worse than showing the picture.
+
+===== 13. The diagram source lives next to the image (issues #15, #66) =====
+
+A diagram used to exist only as an exported picture with its XML hidden inside
+it. Anything that rewrites media - an image optimiser, a format conversion, a
+backup that re-encodes - threw that away and the diagram became a flat picture
+nobody could edit. The XML is now stored beside the image as an ordinary media
+file: ''test:fresh_diagram.png'' gets ''test:fresh_diagram.drawio''.
+
+  - Draw and save diagram 1 at the top of this page.
+  - Open [[?do=media&ns=test|the media manager]]: next to the ''.png'' there is
+    now a ''.drawio'' of the same name. It is a plain media file, so the same
+    namespace ACL governs both - there is no second permission model.
+  - **The check that matters:** with the editor closed, download the ''.png''
+    and upload it again through //Upload new version// after running it through
+    any tool that strips metadata (or simply replace it with an unrelated PNG).
+    Before this change the diagram was gone for good. Now click the diagram:
+    the uploaded image is newer than the source, so it is what opens (that is
+    deliberate - see below) - but delete the image and restore the previous
+    revision, and your diagram is still editable.
+  - **An old diagram still works.** Any diagram saved before this release has
+    no ''.drawio''. It must open exactly as it always did, from the image, and
+    it must grow its ''.drawio'' the first time you save it. Nothing converts
+    anything on read.
+  - **Restoring an old revision must still mean something.** With
+    ''mediarevisions'' on, save a diagram twice, then restore the first
+    revision in the media manager. Click the diagram: you must get the
+    //restored// drawing, not the newest one. The plugin prefers the ''.drawio''
+    source, except when the image is the newer of the two - which is exactly
+    what a restore (or a media manager upload) makes it.
+
+Known wart: the media manager now lists twice as many files in a diagram
+namespace - the same thing the ''.png.draft'' scratch files have always done
+there. Hiding them would make them undeletable, so they are left visible;
+DokuWiki has no mime type for ''.drawio'', so it is never rendered inline and
+''fetch.php'' only ever offers it as a download.
+
+===== 14. A diagram's identity is its name, not its extension =====
+
+''test:plan.png'' and ''test:plan.svg'' are **two renderings of the same
+diagram**, not two diagrams that happen to share a name. Both read and write
+the very same ''test:plan.drawio''; editing either one edits that diagram, and
+saving either overwrites the shared source. This is deliberate, not an
+accident of the naming scheme - see ''helper.php'''s ''sourceID()'' for the
+full reasoning.
+
+  - Draw diagram 1 at the top of this page (''test:fresh_diagram.png''), then
+    open [[?do=media&ns=test|the media manager]] and note ''test:fresh_diagram.drawio''.
+  - Add ''{{drawio>test:fresh_diagram.svg}}'' to a scratch page and open it:
+    it starts from the **same** source, because it is the same diagram in a
+    different format - not a blank one.
+  - Saving one format never regenerates the other format's image file. If
+    only the ''.png'' exists, saving the ''.svg'' does not create or touch it
+    - the ''.png'' is left exactly as it was until someone next saves *in
+    that format*. Nothing here writes a file nobody asked for.
+
+**The one genuine hazard:** if a wiki already has ''plan.png'' and
+''plan.svg'' as two genuinely *different* diagrams - both drawn before this
+plugin stored a shared source, so each still only has its own XML embedded in
+its own image - that difference is silently erased the first time **either**
+one is next saved. Whichever is saved first writes ''plan.drawio'', and from
+then on both formats open from it, not from what used to be their own
+picture. There is no way for the plugin to detect this case (both are just
+image bytes); if a wiki has same-named diagrams like this, rename one of them
+before either is opened for editing again.

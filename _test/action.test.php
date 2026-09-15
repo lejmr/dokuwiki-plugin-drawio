@@ -49,22 +49,24 @@ class action_plugin_drawio_test extends DokuWikiTest
     /**
      * Drive the plugin's ajax handler the same way script.js does for a diagram save.
      */
-    protected function saveViaAjax($mediaId, $content = null)
+    protected function saveViaAjax($mediaId, $content = null, $xml = null)
     {
         if ($content === null) $content = $this->pngBytes();
         $request = new TestRequest();
+        $post = [
+            'call' => 'plugin_drawio',
+            'action' => 'save',
+            'imageName' => $mediaId,
+            'content' => 'data:image/png;base64,' . base64_encode($content),
+        ];
+        // script.js only sends this once the editor has handed it the xml it
+        // exported from; a save without it is what an old cached script.js
+        // (or a pre-source diagram) looks like.
+        if ($xml !== null) $post['xml'] = $xml;
         // Deprecation notices already printed to stdout during bootstrap leave PHP
         // thinking headers were sent, so TestRequest's header_remove() warns here on
         // every run - suppress that unrelated noise instead of failing the test on it.
-        return @$request->post(
-            [
-                'call' => 'plugin_drawio',
-                'action' => 'save',
-                'imageName' => $mediaId,
-                'content' => 'data:image/png;base64,' . base64_encode($content),
-            ],
-            '/lib/exe/ajax.php'
-        );
+        return @$request->post($post, '/lib/exe/ajax.php');
     }
 
     /**
@@ -806,5 +808,349 @@ class action_plugin_drawio_test extends DokuWikiTest
         $this->saveViaAjax($mediaId, $svg);
 
         $this->assertSame($svg, file_get_contents(mediaFN($mediaId)));
+    }
+
+    // --- the diagram source next to the image ----------------------------
+    //
+    // A diagram used to exist only as an exported image with its XML hidden
+    // inside it (a PNG text chunk, an SVG attribute). Anything that rewrites
+    // media - an optimiser, a format conversion, a backup that re-encodes -
+    // drops that and the diagram is a flat picture forever (issues #15, #66).
+    // The XML now lives beside the image as ns:plan.drawio, an ordinary media
+    // file under the very same namespace ACL.
+
+    /** The XML the editor hands to script.js on its 'save' event. */
+    protected function diagramXml($marker = 'x')
+    {
+        return '<mxfile host="embed"><diagram id="' . $marker . '">' . $marker . '</diagram></mxfile>';
+    }
+
+    public function testSaveAlsoWritesTheDiagramSource()
+    {
+        $mediaId = 'test:withsource.png';
+        $xml = $this->diagramXml('one');
+
+        $this->saveViaAjax($mediaId, $this->pngBytes(), $xml);
+
+        $this->assertSame($this->pngBytes(), file_get_contents(mediaFN($mediaId)));
+        $this->assertSame($xml, file_get_contents(mediaFN('test:withsource.drawio')));
+    }
+
+    /**
+     * An SVG carries its XML in a content= attribute, so a sibling looks
+     * redundant - it is not. That attribute is exactly as easy to lose as a
+     * PNG chunk (any SVG optimiser drops unknown attributes), and one rule
+     * for both formats means one code path here and one for the migration
+     * task later.
+     */
+    public function testSaveOfAnSvgAlsoWritesTheDiagramSource()
+    {
+        $mediaId = 'test:vector.svg';
+        $xml = $this->diagramXml('svg');
+        $request = new TestRequest();
+        @$request->post([
+            'call' => 'plugin_drawio', 'action' => 'save', 'imageName' => $mediaId,
+            'content' => 'data:image/svg+xml;base64,' . base64_encode($this->svgBytes()),
+            'xml' => $xml,
+        ], '/lib/exe/ajax.php');
+
+        $this->assertSame($this->svgBytes(), file_get_contents(mediaFN($mediaId)));
+        $this->assertSame($xml, file_get_contents(mediaFN('test:vector.drawio')));
+    }
+
+    /**
+     * The source is the thing worth backing up, so a backup plugin
+     * (gitbacked) has to hear about it the same way it hears about the image.
+     */
+    public function testSaveFiresMediaUploadFinishForTheSourceToo()
+    {
+        $this->saveViaAjax('test:evented.png', $this->pngBytes(), $this->diagramXml());
+
+        $this->assertCount(2, $this->firedEvents, 'image and source each fire once');
+        $ids = array_map(function ($d) { return $d[2]; }, $this->firedEvents);
+        $this->assertSame(['test:evented.png', 'test:evented.drawio'], $ids);
+        $this->assertSame(mediaFN('test:evented.drawio'), $this->firedEvents[1][1]);
+    }
+
+    /** An old, cached script.js sends no xml - that must still save the image. */
+    public function testSaveWithoutXmlStillSavesTheImageAndWritesNoSource()
+    {
+        $this->saveViaAjax('test:noxml.png', $this->pngBytes());
+
+        $this->assertSame($this->pngBytes(), file_get_contents(mediaFN('test:noxml.png')));
+        $this->assertFileDoesNotExist(mediaFN('test:noxml.drawio'));
+    }
+
+    /**
+     * Same rule as every other write here: content is checked against what
+     * the name claims before anything is written, and a refused action writes
+     * nothing at all - not the source, and not the image either.
+     */
+    public function testSaveRejectsXmlThatIsNotADiagram()
+    {
+        $mediaId = 'test:badxml.png';
+        $this->saveViaAjax($mediaId, $this->pngBytes(), '<html><body>not a diagram</body></html>');
+
+        $this->assertFileDoesNotExist(mediaFN($mediaId));
+        $this->assertFileDoesNotExist(mediaFN('test:badxml.drawio'));
+        $this->assertCount(0, $this->firedEvents);
+    }
+
+    public function testSaveRejectsAnOversizedSource()
+    {
+        $mediaId = 'test:hugexml.png';
+        $xml = '<mxfile>' . str_repeat('a', 2 * 1024 * 1024) . '</mxfile>';
+        $this->saveViaAjax($mediaId, $this->pngBytes(), $xml);
+
+        $this->assertFileDoesNotExist(mediaFN($mediaId));
+        $this->assertFileDoesNotExist(mediaFN('test:hugexml.drawio'));
+    }
+
+    /**
+     * .drawio must not become a second way to write an arbitrary file: the id
+     * is derived from the diagram id on the server, and the request's own
+     * name still only ever names a png or an svg.
+     */
+    public function testASourceCannotBeWrittenUnderAClientChosenName()
+    {
+        $this->saveViaAjax('test:evil.drawio', $this->pngBytes(), $this->diagramXml());
+        $this->assertFileDoesNotExist(mediaFN('test:evil.drawio'));
+
+        // and neither can a draft of one
+        $r = new TestRequest();
+        @$r->post(['call' => 'plugin_drawio', 'action' => 'draft_save',
+                   'imageName' => 'test:evil2.drawio',
+                   'content' => '{"lastModified":1,"xml":"<mxfile/>"}'], '/lib/exe/ajax.php');
+        $this->assertFileDoesNotExist(mediaFN('test:evil2.drawio.draft'));
+    }
+
+    /** Drive the open path the way script.js's 'init' handler does. */
+    protected function openViaAjax($mediaId, $action = 'get_png')
+    {
+        $request = new TestRequest();
+        $response = @$request->post(
+            ['call' => 'plugin_drawio', 'action' => $action, 'imageName' => $mediaId],
+            '/lib/exe/ajax.php'
+        );
+        return json_decode($response->getContent(), true);
+    }
+
+    /**
+     * The whole point: opening a diagram loads the XML source, not whatever
+     * survived inside the image.
+     */
+    public function testOpeningADiagramPrefersItsSource()
+    {
+        $mediaId = 'test:prefer.png';
+        $xml = $this->diagramXml('fromsource');
+        $this->saveViaAjax($mediaId, $this->pngBytes(), $xml);
+
+        $data = $this->openViaAjax($mediaId);
+        $this->assertSame($xml, $data['xml'], 'the editor must be handed the source XML');
+        $this->assertSame('data:image/png;base64,' . base64_encode($this->pngBytes()), $data['content']);
+    }
+
+    public function testOpeningAnSvgDiagramPrefersItsSource()
+    {
+        $xml = $this->diagramXml('svgsource');
+        $file = mediaFN('test:presvg.svg');
+        io_makeFileDir($file); file_put_contents($file, $this->svgBytes());
+        $src = mediaFN('test:presvg.drawio');
+        file_put_contents($src, $xml);
+        touch($src, time() + 5);
+
+        $data = $this->openViaAjax('test:presvg.svg', 'get_svg');
+        $this->assertSame($xml, $data['xml']);
+    }
+
+    /** An old diagram has no source - it must still open, from the image. */
+    public function testOpeningADiagramWithoutASourceFallsBackToTheImage()
+    {
+        $file = mediaFN('test:legacy.png');
+        io_makeFileDir($file); file_put_contents($file, $this->pngBytes());
+
+        $data = $this->openViaAjax('test:legacy.png');
+        $this->assertArrayNotHasKey('xml', $data, 'no source means the old xmlpng path');
+        $this->assertSame('data:image/png;base64,' . base64_encode($this->pngBytes()), $data['content']);
+    }
+
+    /** Migration is lazy: an old diagram gains its source the first time it is saved. */
+    public function testAnOldDiagramGainsItsSourceOnTheNextSave()
+    {
+        $mediaId = 'test:lazy.png';
+        $file = mediaFN($mediaId);
+        io_makeFileDir($file); file_put_contents($file, 'old-content');
+        $this->assertFileDoesNotExist(mediaFN('test:lazy.drawio'));
+
+        $this->saveViaAjax($mediaId, $this->pngBytes(), $this->diagramXml('migrated'));
+
+        $this->assertSame($this->diagramXml('migrated'), file_get_contents(mediaFN('test:lazy.drawio')));
+    }
+
+    /**
+     * If someone changed the image behind the plugin's back - a media manager
+     * upload, or restoring an older revision from the attic - that image is
+     * newer than the source and is what the wiki now says the diagram is.
+     * Preferring the source unconditionally would make "restore this revision"
+     * silently do nothing.
+     */
+    public function testAnImageChangedAfterItsSourceWins()
+    {
+        $mediaId = 'test:disagree.png';
+        $this->saveViaAjax($mediaId, $this->pngBytes(), $this->diagramXml('stale'));
+        $this->assertFileExists(mediaFN('test:disagree.drawio'));
+
+        // someone uploads/restores a different image afterwards
+        file_put_contents(mediaFN($mediaId), $this->pngBytes());
+        touch(mediaFN($mediaId), time() + 60);
+        clearstatcache();
+
+        $data = $this->openViaAjax($mediaId);
+        $this->assertArrayNotHasKey('xml', $data,
+            'an image newer than its source must be loaded from the image');
+    }
+
+    /** A zero byte source (issue #66's shape) is not a source. */
+    public function testAnEmptySourceIsIgnored()
+    {
+        $mediaId = 'test:emptysrc.png';
+        $file = mediaFN($mediaId);
+        io_makeFileDir($file); file_put_contents($file, $this->pngBytes());
+        file_put_contents(mediaFN('test:emptysrc.drawio'), '');
+        touch(mediaFN('test:emptysrc.drawio'), time() + 5);
+
+        $data = $this->openViaAjax($mediaId);
+        $this->assertArrayNotHasKey('xml', $data);
+    }
+
+    /** The source obeys the same file mode as everything else written here. */
+    public function testSourceAppliesTheConfiguredFileMode()
+    {
+        global $conf;
+        $conf['fmode'] = 0640;
+        $this->saveViaAjax('test:fmodesrc.png', $this->pngBytes(), $this->diagramXml());
+        clearstatcache();
+        $this->assertSame('0640', substr(sprintf('%o', fileperms(mediaFN('test:fmodesrc.drawio'))), -4));
+    }
+
+    // --- a diagram's identity is its name, not its extension -------------
+    //
+    // ns:plan.png and ns:plan.svg are two renderings of one diagram, not two
+    // diagrams. Both read and write the very same ns:plan.drawio - that is
+    // the maintainer's explicit design decision, not the accidental
+    // consequence of sourceID() replacing rather than appending the
+    // extension. See helper.php's sourceID() docblock for the full reasoning.
+
+    /**
+     * Saving one format, then opening the diagram in the other format, must
+     * yield the same diagram - they are two renderings of one thing, not two
+     * separate diagrams that happen to sit next to each other.
+     */
+    public function testSavingOneFormatMakesTheOtherFormatOpenTheSameDiagram()
+    {
+        $xml = $this->diagramXml('shared');
+
+        // only the png exists on disk; save it with its source
+        $this->saveViaAjax('test:identity.png', $this->pngBytes(), $xml);
+
+        // the svg has never been saved, but opening it must still see the
+        // very same source, because it is the same diagram
+        $svgFile = mediaFN('test:identity.svg');
+        io_makeFileDir($svgFile);
+        file_put_contents($svgFile, $this->svgBytes());
+
+        $data = $this->openViaAjax('test:identity.svg', 'get_svg');
+        $this->assertSame($xml, $data['xml'], 'the svg rendering must open the diagram the png save wrote');
+    }
+
+    /**
+     * Saving alternately between the two formats must not lose the source -
+     * each save simply overwrites the one shared file, and the most recent
+     * save (in either format) is what both formats open from afterwards.
+     */
+    public function testAlternatingSavesBetweenFormatsDoNotLoseTheSource()
+    {
+        $mediaId1 = 'test:alt.png';
+        $mediaId2 = 'test:alt.svg';
+
+        $this->saveViaAjax($mediaId1, $this->pngBytes(), $this->diagramXml('first'));
+        $this->assertFileExists(mediaFN('test:alt.drawio'));
+
+        $request = new TestRequest();
+        @$request->post([
+            'call' => 'plugin_drawio', 'action' => 'save', 'imageName' => $mediaId2,
+            'content' => 'data:image/svg+xml;base64,' . base64_encode($this->svgBytes()),
+            'xml' => $this->diagramXml('second'),
+        ], '/lib/exe/ajax.php');
+        $this->assertFileExists(mediaFN('test:alt.drawio'), 'the source must still be there after the second save');
+
+        $pngData = $this->openViaAjax($mediaId1, 'get_png');
+        $svgData = $this->openViaAjax($mediaId2, 'get_svg');
+        $this->assertSame($this->diagramXml('second'), $pngData['xml']);
+        $this->assertSame($this->diagramXml('second'), $svgData['xml']);
+    }
+
+    /**
+     * The maintainer's rule, taken literally: saving one format must not
+     * write the other format's image. A save that touched a file the user
+     * never asked to save would be a surprise a stale sibling image is not.
+     */
+    public function testSavingOneFormatDoesNotTouchTheOtherFormatsImage()
+    {
+        $pngFile = mediaFN('test:onlyone.png');
+        io_makeFileDir($pngFile);
+        file_put_contents($pngFile, 'original-png-bytes');
+        $pngMtime = filemtime($pngFile);
+
+        $this->saveViaAjax('test:onlyone.svg', $this->svgBytes(), $this->diagramXml());
+
+        clearstatcache();
+        $this->assertSame('original-png-bytes', file_get_contents($pngFile), 'the untouched format must be left alone');
+        $this->assertSame($pngMtime, filemtime($pngFile), 'not even the mtime may change');
+    }
+
+    // --- _write_file() must not report success for a write that failed ---
+
+    /**
+     * The arbiter's reproduction: obstruct the destination (put a directory
+     * where the file is supposed to land, so rename() cannot replace it) and
+     * the unfixed _write_file() still returned true - firing
+     * MEDIA_UPLOAD_FINISH and leaving an orphaned .tmp file behind for a
+     * write that never happened.
+     */
+    public function testFailedRenameLeavesNoOrphanTmpAndFiresNoEvent()
+    {
+        $mediaId = 'test:obstruct.png';
+        $file = mediaFN($mediaId);
+        io_makeFileDir($file);
+        mkdir($file, 0777, true); // obstruct: rename() cannot replace a directory
+
+        @$this->saveViaAjax($mediaId, $this->pngBytes());
+
+        $this->assertTrue(is_dir($file), 'the obstruction itself must be untouched');
+        $this->assertCount(0, $this->firedEvents, 'no event may fire for a write that did not happen');
+        $this->assertSame([], glob($file . '.*.tmp'), 'a failed rename must not leave an orphaned tmp file');
+    }
+
+    /**
+     * The other caller of _write_file(): the same fix must not regress the
+     * branch's own reasoning that a failed *source* write still leaves a
+     * successful image save - only the source's event/tmp file are affected.
+     */
+    public function testFailedSourceWriteStillLeavesTheImageSaveSuccessful()
+    {
+        $mediaId = 'test:srcobstruct.png';
+        $file = mediaFN($mediaId);
+        $srcFile = mediaFN('test:srcobstruct.drawio');
+        io_makeFileDir($srcFile);
+        mkdir($srcFile, 0777, true); // obstruct only the source
+
+        @$this->saveViaAjax($mediaId, $this->pngBytes(), $this->diagramXml());
+
+        $this->assertSame($this->pngBytes(), file_get_contents($file), 'the image must still be saved');
+        $this->assertCount(1, $this->firedEvents, 'only the image write may fire an event');
+        $this->assertSame($mediaId, $this->firedEvents[0][2]);
+        $this->assertTrue(is_dir($srcFile), 'the source obstruction must be untouched');
+        $this->assertSame([], glob($srcFile . '.*.tmp'), 'a failed source write must not leave an orphaned tmp file');
     }
 }

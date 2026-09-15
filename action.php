@@ -85,6 +85,16 @@
          * with mediarevisions off, where there is no attic copy to recover
          * from. chmod() applies the configured mode rather than the umask's.
          *
+         * rename()'s return value has to be checked too: it can fail (the
+         * destination is on another filesystem, a permission problem, the
+         * destination path is itself a directory, ...), and an unchecked
+         * failure used to make this function report success anyway - leaving
+         * the .tmp file behind forever and, worse, letting the caller fire
+         * MEDIA_UPLOAD_FINISH and tell script.js the save worked for a file
+         * that was never written. Verified live: obstructing the destination
+         * (a directory in its place, so rename() cannot replace it) left an
+         * orphaned .tmp file in the media directory and the event still fired.
+         *
          * @param string $fl      full path of the target file
          * @param string $content bytes to write
          * @return bool           false if nothing was written
@@ -96,9 +106,55 @@
                 @unlink($tmp);
                 return false;
             }
-            rename($tmp, $fl);
+            if (!rename($tmp, $fl)) {
+                @unlink($tmp);
+                return false;
+            }
             chmod($fl, $conf['fmode']);
             return true;
+        }
+
+        /**
+         * The stored XML source of a diagram, or '' if it should not be used.
+         *
+         * The source wins over the image - that is the whole point of storing
+         * it - *unless* the image is the newer of the two. The plugin cannot
+         * tell whether an image and a source actually disagree (that would
+         * mean rendering the XML and comparing pictures), but it can tell
+         * which one the wiki touched last, and last-write-wins is what a wiki
+         * does with everything else.
+         *
+         * That is not a detail. Saving writes the image and then the source,
+         * so a normal save always leaves the source at least as new and the
+         * source is used. An image that is newer than its source got there
+         * some other way: an upload over it in the media manager, or
+         * restoring an older revision from the attic. Preferring the source
+         * unconditionally would make "restore this revision" appear to work
+         * and then silently hand the editor the newest diagram anyway -
+         * a regression against today's behaviour, where restoring an old
+         * image restores the XML embedded in it too. So: whatever was written
+         * last is the diagram, and no prompt asks the user to adjudicate
+         * something they have no way to inspect.
+         *
+         * Equal mtimes resolve to the source (filemtime has one second
+         * resolution and both files are written inside the same second).
+         *
+         * A zero byte source is treated as absent, the same way syntax.php
+         * treats a zero byte diagram (issue #66).
+         *
+         * @param string $media_id the diagram's id
+         * @param string $fl       the diagram image's path on disk
+         * @return string          the xml, or ''
+         */
+        private function _source_xml($media_id, $fl) {
+            $helper = plugin_load('helper', 'drawio');
+            if (!$helper) return '';
+            $src_id = $helper->sourceID($media_id);
+            if ($src_id === '') return '';
+            $src_fl = mediaFN($src_id);
+            if (!file_exists($src_fl) || filesize($src_fl) === 0) return '';
+            if (@filemtime($src_fl) < @filemtime($fl)) return '';
+            return file_get_contents($src_fl);
         }
 
         /**
@@ -326,6 +382,39 @@
 					}
 				}
 
+				// The diagram's XML source, sent alongside the exported image by
+				// script.js (the editor hands it both on its 'save' event). It
+				// is optional: a cached older script.js, or any other caller,
+				// sends no 'xml' at all and still saves the image exactly as
+				// before - that is what keeps existing wikis working while
+				// diagrams pick up a source lazily, one save at a time.
+				//
+				// The id it is written under comes from the helper, derived
+				// from $media_id, so no request ever names a .drawio file -
+				// and the png/svg whitelist above has already refused an
+				// imageName ending in .drawio anyway.
+				//
+				// Validated here, before the image is written, for the same
+				// reason as everything else on this path: a refused action
+				// writes nothing at all. Same 2 MiB cap and same
+				// bytes-match-the-name rule the draft and the image get.
+				$xml = $INPUT->post->str('xml');
+				$src_id = '';
+				if ($xml !== '') {
+					if (strlen($xml) > 2 * 1024 * 1024) {
+						http_status(400);
+						return;
+					}
+					$helper = plugin_load('helper', 'drawio');
+					if ($helper && $helper->isDiagramXml($xml)) {
+						$src_id = $helper->sourceID($media_id);
+					}
+					if ($src_id === '') {
+						http_status(400);
+						return;
+					}
+				}
+
 				$old = @filemtime($fl);
 				if(!file_exists(mediaFN($media_id, $old)) && file_exists($fl)) {
 					// add old revision to the attic if missing
@@ -364,22 +453,59 @@
 				list(, $mime) = mimetype($media_id);
 				$data = [basename($fl), $fl, $media_id, $mime, $overwrite, null];
 				\dokuwiki\Extension\Event::createAndTrigger('MEDIA_UPLOAD_FINISH', $data, null, false);
+
+				// Now the source, after the image and only if the image got
+				// written. If this write fails the save still counts as
+				// successful: the image on disk is the new diagram, it still
+				// has the XML embedded in it the way it always did, and it is
+				// now newer than any stale .drawio left behind - which is
+				// exactly the condition the read path uses to ignore one. So a
+				// failure here leaves the user precisely where they were
+				// before this feature existed, instead of failing a save that
+				// actually worked and telling them their change was lost.
+				//
+				// $src_id is shared by ns:plan.png and ns:plan.svg - that is
+				// the point, not a bug: the diagram's identity is ns:plan,
+				// the extension only names a rendering of it, and saving
+				// either format is a save of the same diagram (see helper.php's
+				// sourceID() for the full reasoning, including the one real
+				// hazard and why the *other* format's image is deliberately
+				// never regenerated here). Nothing above refuses this write
+				// because $src_fl already exists - overwriting it is exactly
+				// what every save of the same diagram is supposed to do.
+				//
+				// No attic copy and no media changelog entry for the source:
+				// the image already has both, and its attic copies carry the
+				// embedded XML, so the history is not lost by keeping it in
+				// one place instead of doubling every diagram's entries. The
+				// MEDIA_UPLOAD_FINISH is fired though - a backup plugin that
+				// commits the derived image but not the source it was derived
+				// from would be backing up the wrong file.
+				if ($src_id !== '') {
+					$src_fl = mediaFN($src_id);
+					$src_overwrite = file_exists($src_fl);
+					if ($this->_write_file($src_fl, $xml)) {
+						$src_data = [basename($src_fl), $src_fl, $src_id, 'application/xml', $src_overwrite, null];
+						\dokuwiki\Extension\Event::createAndTrigger('MEDIA_UPLOAD_FINISH', $src_data, null, false);
+					}
+				}
             }
-            if($action == 'get_png'){
+            if($action == 'get_png' || $action == 'get_svg'){
 				if (!file_exists($fl)) return;
                 // Return image in the base64 for draw.io
                 header('Content-Type: application/json');				
-                //$fc = file_get_contents($file_path);
                 $fc = file_get_contents($fl);
-				echo json_encode(["content" => "data:image/png;base64,".base64_encode($fc)]);
-            }
-            if($action == 'get_svg'){
-				if (!file_exists($fl)) return;
-                // Return image in the base64 for draw.io
-                header('Content-Type: application/json');				
-                //$fc = file_get_contents($file_path);
-                $fc = file_get_contents($fl);
-				echo json_encode(["content" => "data:image/svg+xml;base64,".base64_encode($fc)]);
+				$mime = $action == 'get_png' ? 'image/png' : 'image/svg+xml';
+				$out = ["content" => "data:$mime;base64,".base64_encode($fc)];
+				// The XML source, when there is one. script.js loads the
+				// editor straight from this and never touches the image;
+				// without it, it falls back to xmlpng/xmlsvg exactly as
+				// before, which is what keeps every existing diagram working.
+				// Same file, same namespace, so the ACL checked above is the
+				// one that governs it - nothing extra to check here.
+				$xml = $this->_source_xml($media_id, $fl);
+				if ($xml !== '') $out['xml'] = $xml;
+				echo json_encode($out);
             }
             
             // Draft section
