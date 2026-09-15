@@ -1,0 +1,199 @@
+name: Release
+
+# The only way to cut a release: Actions -> Release -> Run workflow (works
+# fine from a phone), optionally giving a version (blank = today). Manually
+# triggered only - a pull request, including one from a fork, cannot set
+# this off, which is why it is the one workflow in this repository trusted
+# with contents: write.
+#
+# It owns the whole release, in this order, and pushes nothing until the
+# tests have passed:
+#
+#   1. bump plugin.info.txt's date
+#   2. run the full three-branch test matrix against that change
+#   3. only now: commit the bump to master and tag it
+#   4. build the distribution zip from the tagged commit
+#   5. publish the GitHub release (changelog as the body, zip attached)
+#   6. print the dokuwiki.org paste-ready block into the job summary
+#
+# The tag is created by this workflow and only by this workflow. A
+# hand-made tag would point at a commit whose plugin.info.txt still has
+# yesterday's date - the released zip and the tag would disagree, and the
+# only fixes are force-moving a tag or shipping content that doesn't match
+# what was tagged. Nobody should have to untangle that from a phone.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release date (YYYY-MM-DD). Leave blank to use today."
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2 (2.37.2)
+        with:
+          php-version: '8.3'
+          extensions: dom, json, mbstring
+
+      # ---- everything below must fail loudly before anything is changed ----
+
+      - name: work out the release version
+        id: version
+        run: |
+          ver="${{ inputs.version }}"
+          [ -n "$ver" ] || ver=$(date +%F)
+          case "$ver" in
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+            *) echo "::error::'$ver' is not a YYYY-MM-DD date"; exit 1 ;;
+          esac
+          # DokuWiki's updater only ever compares dates - there is no reason
+          # to backdate or postdate one, and a mismatch here is almost
+          # certainly a typo in the input.
+          today=$(date +%F)
+          if [ "$ver" != "$today" ]; then
+            echo "::error::use today's date ($today), or leave the input blank"
+            exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+      - name: refuse to re-release a version that already shipped
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          if git rev-parse -q --verify "refs/tags/$v" >/dev/null; then
+            echo "::error::tag $v already exists - $v was already released"
+            exit 1
+          fi
+
+      - name: CHANGELOG.md has a section for this release
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          grep -q "^## \[$v\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## [$v]' section"; exit 1; }
+
+      - name: bump plugin.info.txt's date
+        run: bin/bump-date.sh
+
+      - name: plugin.info.txt passes its own check
+        # The date is right as of the previous step, so a failure here is
+        # for some other reason (a missing field, a wrong 'base', ...) and
+        # should still stop the release.
+        run: bin/check-plugin-info.sh
+
+      - name: php -l
+        run: find . -name '*.php' -not -path './.cache/*' -print0 | xargs -0 -n1 php -l
+
+      - name: javascript
+        run: |
+          node --check script.js
+          node _test/script.test.js
+
+      # The same bin/run-tests.sh ci.yml's matrix calls, run in sequence
+      # instead of as separate jobs: the commit below must not be pushed
+      # until these have passed, which only works from inside one job.
+      # stable and oldstable are the releases people actually run and gate
+      # the release; master is DokuWiki's development branch and, as in
+      # ci.yml, informational only.
+      - name: tests (DokuWiki stable)
+        run: bin/run-tests.sh stable
+      - name: tests (DokuWiki oldstable)
+        run: bin/run-tests.sh oldstable
+      - name: tests (DokuWiki master)
+        run: bin/run-tests.sh master || echo "::warning::plugin fails against DokuWiki's development branch - not blocking the release"
+
+      # ---- nothing above touched git history or the network; from here on it does ----
+
+      - name: commit the bump and tag the release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "release: ${{ steps.version.outputs.version }}"
+          git tag "${{ steps.version.outputs.version }}"
+          git push origin HEAD:master --follow-tags
+
+      - name: build the distribution zip
+        run: |
+          mkdir -p dist
+          # git archive honours .gitattributes export-ignore, so dev-only
+          # paths (bin/, _test/, docker/, .github/, ...) never ship. The
+          # prefix is the folder name the zip unpacks into. DokuWiki's
+          # extension manager reads plugin.info.txt's own `base` field for
+          # an automated install, but a manual "unzip and drop it into
+          # lib/plugins/" install has no such logic, so the zip's own
+          # top-level folder has to already be named right.
+          git archive --prefix=drawio/ -o dist/drawio.zip HEAD
+          echo ":: dist/drawio.zip contents"
+          unzip -l dist/drawio.zip
+
+      - name: pull this release's section out of CHANGELOG.md
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          awk -v v="$v" '
+            $0 == "## [" v "]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+
+      - name: the dokuwiki.org dataentry block for this release
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          {
+            echo '```'
+            echo '---- plugin ----'
+            echo 'base         : drawio'
+            echo 'author       : Milos Kozak'
+            echo 'email        : milos.kozak@lejmr.com'
+            echo 'type         : syntax, action, admin, helper'
+            echo "lastupdate   : $v"
+            # The releases CI actually gates on (stable + oldstable above;
+            # master is informational and is not itself a release).
+            echo 'compatible   : 2025-05-14, Librarian; 2026-07-14, Mort'
+            echo 'depends      :'
+            echo 'conflicts    :'
+            echo 'similar      :'
+            echo 'tags         : diagram, drawio, uml'
+            # The release asset, not GitHub's auto-generated
+            # archive/master.zip: an asset download is counted, an
+            # archive.zip download is not, and this is the maintainer's
+            # only signal for how widely the plugin is actually used.
+            echo "downloadurl  : https://github.com/${GITHUB_REPOSITORY}/releases/download/$v/drawio.zip"
+            echo "bugtracker   : https://github.com/${GITHUB_REPOSITORY}/issues"
+            echo "sourcerepo   : https://github.com/${GITHUB_REPOSITORY}"
+            echo 'donationurl  :'
+            echo "screenshoturl: https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/master/screenshot.png"
+            echo 'descriptionurl:'
+            echo '----'
+            echo '```'
+          } > plugin-block.md
+          # Two taps on a phone: the job summary, right on the run page.
+          {
+            echo "### Paste this onto <https://www.dokuwiki.org/plugin:drawio>"
+            echo
+            cat plugin-block.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: assemble the release body
+        run: |
+          {
+            cat release-notes.md
+            echo
+            echo '## For the dokuwiki.org plugin page'
+            echo
+            echo 'Paste this over the `---- plugin ----` block:'
+            echo
+            cat plugin-block.md
+          } > release-body.md
+
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          body_path: release-body.md
+          files: dist/drawio.zip

@@ -6,7 +6,9 @@ on:
   pull_request:
   schedule:
     # Weekly, so a new DokuWiki release that breaks the plugin shows up here
-    # before users report it.
+    # before users report it. GitHub disables this trigger after 60 days
+    # without repository activity - see DEVELOPMENT.md's note on coming
+    # back after a long time before trusting its silence.
     - cron: '17 4 * * 1'
 
 # No job needs anything but read access to the repo checkout.
@@ -55,6 +57,12 @@ jobs:
           php-version: '8.3'
           extensions: dom, json, mbstring
       - name: PHPUnit (golden - fast fail)
+        # DokuWiki's development branch moves; a plugin failing against an
+        # unreleased DokuWiki is a warning for a contributor two years from
+        # now, not a reason to block their pull request. stable and
+        # oldstable are the releases people actually run and stay strict.
+        continue-on-error: ${{ matrix.dokuwiki == 'master' }}
         run: bin/run-tests.sh ${{ matrix.dokuwiki }} golden
       - name: PHPUnit (full suite)
+        continue-on-error: ${{ matrix.dokuwiki == 'master' }}
         run: bin/run-tests.sh ${{ matrix.dokuwiki }}
