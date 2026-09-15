@@ -2,7 +2,7 @@
 var drawIoEditor= JSINFO['plugin_drawio']['url'] + '?embed=1&ui=atlas&spin=1&proto=json';
 var toolbarPossibleExtension=JSINFO['plugin_drawio']['toolbar_possible_extension'];
 var initial = null;
-var name = null;
+var currentDiagramId = null;
 var imagePointer = null;
 
 function edit(image)
@@ -31,6 +31,7 @@ function edit_cb(image)
     }
 
     imagePointer = image;
+    currentDiagramId = imagePointer.getAttribute('id');
     imageFormat = imagePointer.getAttribute('id').split('.');
     if (imageFormat.length>2) {
         alert('File name format or extension error: should be filename.extension (available extension :' + toolbarPossibleExtension + ')');
@@ -53,7 +54,7 @@ function edit_cb(image)
         document.body.removeChild(iframe);
     };
     
-    var draft = localStorage.getItem('.draft-' + name);
+    var draft = localStorage.getItem('.draft-' + currentDiagramId);
 
     // Prefer the draft from browser cache
     if(draft == null){
@@ -181,8 +182,7 @@ function edit_cb(image)
                     trElement.style.textAlign = "center" ;
                 }
                 
-                localStorage.setItem(name, JSON.stringify({lastModified: new Date(), data: imgData}));
-                localStorage.removeItem('.draft-' + name);
+                localStorage.removeItem('.draft-' + currentDiagramId);
                 draft = null;
 				close();
 
@@ -216,7 +216,7 @@ function edit_cb(image)
             else if (msg.event == 'autosave')
             {
                 dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
-                localStorage.setItem('.draft-' + name, dr);
+                localStorage.setItem('.draft-' + currentDiagramId, dr);
 
                 // Save on-disk
                 jQuery.post(
@@ -237,14 +237,14 @@ function edit_cb(image)
                     iframe.contentWindow.postMessage(JSON.stringify({action: 'export',
                     format: 'xmlpng', xml: msg.xml, spin: 'Updating page'}), '*');
                     dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
-                    localStorage.setItem('.draft-' + name, dr);
+                    localStorage.setItem('.draft-' + currentDiagramId, dr);
                 } 
                 else if (imageFormat ==='svg') 
                 {
                     iframe.contentWindow.postMessage(JSON.stringify({action: 'export',
                     format: 'xmlsvg', xml: msg.xml, spin: 'Updating page'}), '*');
                     dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
-                    localStorage.setItem('.draft-' + name, dr);
+                    localStorage.setItem('.draft-' + currentDiagramId, dr);
                 }
                 // Save on-disk
                 jQuery.post(
@@ -259,7 +259,7 @@ function edit_cb(image)
             }
             else if (msg.event == 'exit')
             {
-                localStorage.removeItem('.draft-' + name);
+                localStorage.removeItem('.draft-' + currentDiagramId);
                 draft = null;
 
                 // Remove all draft files
@@ -320,7 +320,7 @@ if (typeof window.toolbar !== 'undefined') {
             close: ""
     };
     
-    } else if (toolbarPossibleExtension.length = 1) {
+    } else if (toolbarPossibleExtension.length == 1) {
         // toobar definition in case of only one extension defined
         if (toolbarPossibleExtension[0] == ""){
             toolbar[toolbar.length] = {
