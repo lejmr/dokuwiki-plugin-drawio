@@ -1,0 +1,112 @@
+name: dokuwiki.org listing check
+
+# The plugin.info.txt date bumped by the release workflow is only half of
+# what makes an update reach users - the other half is the `---- plugin ----`
+# block on https://www.dokuwiki.org/plugin:drawio, which the maintainer
+# pastes by hand (see the release workflow's job summary / release notes for
+# the paste-ready block). This checks whether that page has actually been
+# updated, and files an issue if not - a red scheduled workflow is easy to
+# miss, a notification is not.
+#
+# GitHub disables scheduled workflows after 60 days without repository
+# activity, which for a plugin like this is the normal state between
+# releases. That's fine: this check earns its keep in the weeks around a
+# release. Its silence on a dormant repo is not a signal that the listing is
+# fine - see DEVELOPMENT.md before trusting an old green run here. Run it by
+# hand (Actions -> this workflow -> Run workflow) any time you want a fresh
+# answer regardless of the schedule.
+on:
+  schedule:
+    - cron: '25 6 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0   # need the tags to find the newest release
+
+      - name: fetch the published listing
+        id: fetch
+        run: |
+          # dokuwiki.org being unreachable, slow, or returning something
+          # that isn't the JSON we expect must never fail this build - it
+          # says nothing about whether the plugin itself is fine.
+          if ! curl -fsS --max-time 20 -o repo.json \
+              'https://www.dokuwiki.org/lib/plugins/pluginrepo/api.php?fmt=json&extname=drawio'; then
+            echo "::warning::could not reach the dokuwiki.org repository API - skipping this run"
+            echo "reachable=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! jq -e . repo.json >/dev/null 2>&1; then
+            echo "::warning::dokuwiki.org did not return JSON (bot check, maintenance page, ...) - skipping this run"
+            echo "reachable=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "reachable=true" >> "$GITHUB_OUTPUT"
+
+      - name: compare the listing against this repo
+        id: compare
+        if: steps.fetch.outputs.reachable == 'true'
+        run: |
+          # The API returns one object for a single extname; be lenient and
+          # also accept an array, in case that ever changes.
+          entry='if type == "array" then .[0] else . end'
+          published_date=$(jq -r "($entry).lastupdate // empty" repo.json)
+          published_url=$(jq -r "($entry).downloadurl // empty" repo.json)
+          info_date=$(sed -nE 's/^date[[:space:]]+(.*[^[:space:]])[[:space:]]*$/\1/p' plugin.info.txt)
+          newest_tag=$(git tag --list '20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]' | sort | tail -1)
+
+          echo "published_date=$published_date" >> "$GITHUB_OUTPUT"
+          echo "published_url=$published_url" >> "$GITHUB_OUTPUT"
+          echo "info_date=$info_date" >> "$GITHUB_OUTPUT"
+          echo "newest_tag=$newest_tag" >> "$GITHUB_OUTPUT"
+
+          stale=false
+          [ "$published_date" = "$info_date" ] || stale=true
+          if [ -n "$newest_tag" ] && ! printf '%s' "$published_url" | grep -q "/$newest_tag/"; then
+            stale=true
+          fi
+          echo "stale=$stale" >> "$GITHUB_OUTPUT"
+
+          echo "published lastupdate: $published_date  (repo: $info_date)"
+          echo "published downloadurl: $published_url  (newest release: $newest_tag)"
+
+      - name: keep the tracking issue in sync
+        if: steps.fetch.outputs.reachable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "dokuwiki.org listing is out of date"
+        run: |
+          existing=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
+
+          if [ "${{ steps.compare.outputs.stale }}" = "true" ]; then
+            release_url="${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.compare.outputs.newest_tag }}"
+            body=$(
+              echo "The [plugin:drawio](https://www.dokuwiki.org/plugin:drawio) page has drifted from this repository."
+              echo
+              echo "|                | published listing | repository |"
+              echo "|----------------|--------------------|------------|"
+              echo "| \`lastupdate\`  | ${{ steps.compare.outputs.published_date }} | ${{ steps.compare.outputs.info_date }} |"
+              echo "| \`downloadurl\` | ${{ steps.compare.outputs.published_url }} | release [${{ steps.compare.outputs.newest_tag }}]($release_url) |"
+              echo
+              echo "The paste-ready \`---- plugin ----\` block is in that release's notes:"
+              echo "$release_url"
+              echo
+              echo "Paste it over the current block on the plugin page, save, and this issue closes itself on the next check."
+            )
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --body "$body"
+            else
+              gh issue create --title "$TITLE" --body "$body"
+            fi
+          elif [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "In sync again (lastupdate ${{ steps.compare.outputs.info_date }}). Closing."
+            gh issue close "$existing"
+          fi

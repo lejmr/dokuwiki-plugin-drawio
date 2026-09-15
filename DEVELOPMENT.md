@@ -62,15 +62,47 @@ node _test/golden/script.test.js   # fast, one check per feature
 node _test/extra/script.test.js    # edge cases, security regressions, implementation details
 ```
 
-## Before releasing
+## Releasing
+
+Everything happens in one place: **Actions → Release → Run workflow**. It
+works fine from a phone. Leave the version input blank to release today (the
+normal case - DokuWiki's updater only ever compares dates, so there is never
+a reason to pick another one).
+
+Clicking it runs the whole release, in order, refusing loudly before it
+changes anything if a step isn't ready: bumps the date in `plugin.info.txt`,
+runs the full three-branch test suite against that change, and only once
+that's green does it commit the bump, tag it, build the distribution zip,
+and publish a GitHub release with the matching `CHANGELOG.md` section as its
+body and the zip attached. A version that was already released, or a
+version with no `CHANGELOG.md` section, is refused before anything is
+touched - so add the changelog entry first.
+
+The one thing the workflow can't do for you: the run's **summary** (and the
+release notes) end with a `---- plugin ----` block, ready to paste over the
+one on <https://www.dokuwiki.org/plugin:drawio>. Copy it, paste it, save -
+that page is what DokuWiki's updater and the extension search actually read,
+and bumping `plugin.info.txt` alone does not reach it (this is why issue #67
+stayed open for four years). `downloadurl` in that block points at the
+release's zip **asset**, not GitHub's automatic `archive/master.zip` - only
+an asset download is counted, and that count is the only usage signal this
+plugin has, with nothing phoning home.
+
+Tags are created by the workflow only. A tag made by hand would point at a
+commit whose `plugin.info.txt` still has the previous date, so the zip and
+the tag would disagree about what was released - don't create one yourself.
+
+**Install counts**, once a release has asset downloads to show:
 
 ```sh
-bin/check-plugin-info.sh   # CI runs this too
-bin/bump-date.sh           # sets the date DokuWiki's updater compares against
+gh api repos/lejmr/dokuwiki-plugin-drawio/releases --jq '.[] | {tag: .tag_name, downloads: ([.assets[].download_count] | add // 0)}'
 ```
 
-A stale date in `plugin.info.txt` means installed wikis never see the update
-(issue #67), so CI fails the build when plugin code is newer than that date.
+or, from a phone, the same numbers are on each release's page:
+<https://github.com/lejmr/dokuwiki-plugin-drawio/releases>.
+
+`bin/check-plugin-info.sh` and `bin/bump-date.sh`, called by the release
+workflow above, are also there to run by hand while developing.
 
 ## Verifying a change
 
@@ -123,6 +155,38 @@ the reviewer's time and trust.
 ## CI
 
 `.github/workflows/ci.yml` runs the metadata check, `php -l`, the JavaScript
-check, and the PHP test suite against **master, stable and oldstable** on every pull request, on
-pushes to master, and once a week - the
-weekly run is what catches a new DokuWiki release breaking the plugin.
+check, and the PHP test suite against **master, stable and oldstable** on
+every pull request, on pushes to master, and once a week - the weekly run is
+what catches a new DokuWiki release breaking the plugin. Only stable and
+oldstable are strict; a failure against DokuWiki's development branch
+(master) is reported but does not fail the build, since it means an
+unreleased DokuWiki changed something, not that this plugin regressed.
+
+`.github/workflows/repo-listing.yml` compares the dokuwiki.org plugin page
+against this repository (see **Releasing** above) on a weekly schedule, or
+on demand via **Run workflow**, and files or updates a GitHub issue when
+they've drifted - never fails a build over it, and never breaks if
+dokuwiki.org itself is unreachable. See **Coming back after a long time**
+below for what its silence does and doesn't mean.
+
+## Coming back after a long time
+
+This plugin has one maintainer and goes quiet between releases - that's
+normal, not a warning sign. A few things worth knowing before doing anything
+else:
+
+- **`bin/test.sh` is ground truth.** It runs PHPUnit against a real DokuWiki
+  checkout, so trust it over CI's colour.
+- **A red `master` leg in the test matrix is information, not a defect** -
+  DokuWiki's development branch moved and the plugin may need a small
+  follow-up, or may not.
+- **CI can go red for reasons that have nothing to do with this plugin**:
+  the pinned action SHAs age, the PHP version in the workflows eventually
+  stops being offered by `setup-php`, DokuWiki's `master` moves. None of
+  that means the last release is broken.
+- **The scheduled workflows (CI's weekly run, the listing check) may not
+  have run in a long time.** GitHub disables a scheduled trigger after 60
+  days without repository activity, which is the default state for a quiet
+  plugin. Their being silent is not evidence anything is fine - open
+  **Actions → Run workflow** on `repo-listing.yml` for a current answer
+  before assuming the dokuwiki.org page still matches the repo.
