@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [master]   # branches are covered by their pull request
+  pull_request:
+  schedule:
+    # Weekly, so a new DokuWiki release that breaks the plugin shows up here
+    # before users report it.
+    - cron: '17 4 * * 1'
+
+jobs:
+  metadata:
+    name: metadata & lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # check-plugin-info.sh compares against the git log
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+      - name: plugin.info.txt
+        # strict on master (that is where a release is cut), advisory on branches
+        run: bin/check-plugin-info.sh ${{ github.ref_name == 'master' && ' ' || '--warn' }}
+      - name: php -l
+        run: find . -name '*.php' -not -path './.cache/*' -print0 | xargs -0 -n1 php -l
+
+  tests:
+    name: tests (DokuWiki ${{ matrix.dokuwiki }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dokuwiki: [master, stable, oldstable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: dom, json, mbstring
+      - name: PHPUnit
+        run: bin/run-tests.sh ${{ matrix.dokuwiki }}
