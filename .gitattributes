@@ -1,0 +1,17 @@
+# Development-only files. GitHub's plugin download link (and any other
+# `git archive`-based source, e.g. codeload.github.com/.../archive/*.zip)
+# honours export-ignore, so none of this ships in a plugin install even
+# though it lives in the same repository as the plugin code.
+#
+# This is NOT sufficient on its own: `git clone` ignores export-ignore
+# entirely. See docker/dev-entrypoint.sh, which stopped shipping a
+# committed credentials file for that reason.
+/docker export-ignore
+/bin export-ignore
+/_test export-ignore
+/.github export-ignore
+/DEVELOPMENT.md export-ignore
+/REVIEW.md export-ignore
+/docker-compose.yaml export-ignore
+/.gitignore export-ignore
+/.gitattributes export-ignore

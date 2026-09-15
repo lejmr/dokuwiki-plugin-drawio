@@ -11,4 +11,24 @@ for f in /seed/pages/*; do
   [ -e "/storage/data/pages/$(basename "$f")" ] || cp "$f" /storage/data/pages/
 done
 
+# The admin user is generated here rather than shipped as a committed
+# users.auth.php. That file has no `<?php` opening tag - DokuWiki's plain-text
+# auth format is a colon-separated line, not a PHP script - so if it is ever
+# served over the web (a plugin install has no .htaccess protecting
+# lib/plugins/) the password hash comes back as plain text. Generating it at
+# container start means there is nothing to serve, in the repo or on disk
+# before this line runs. Password defaults to "admin", override with
+# DW_ADMIN_PASSWORD.
+if [ ! -e /storage/conf/users.auth.php ]; then
+  DW_ADMIN_PASSWORD="${DW_ADMIN_PASSWORD:-admin}" php -r '
+    $hash = password_hash(getenv("DW_ADMIN_PASSWORD"), PASSWORD_BCRYPT);
+    file_put_contents(
+        "/storage/conf/users.auth.php",
+        "# users.auth.php\n" .
+        "# Generated at container start by docker/dev-entrypoint.sh - do not edit, not committed.\n" .
+        "admin:$hash:admin:admin@example.com:admin,user\n"
+    );
+  '
+fi
+
 exec /dokuwiki-entrypoint.sh "$@"

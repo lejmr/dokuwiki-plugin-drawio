@@ -9,8 +9,12 @@
  * @group plugin_drawio
  * @group plugins
  */
+require_once __DIR__ . '/acl.inc.php';
+
 class syntax_plugin_drawio_test extends DokuWikiTest
 {
+    use drawio_acl_test_helper;
+
     protected $pluginsEnabled = ['drawio'];
 
     /**
@@ -220,6 +224,32 @@ class syntax_plugin_drawio_test extends DokuWikiTest
 
         $this->assertStringContainsString('blank-image.png', $html);
         $this->assertStringContainsString('onclick', $html);
+    }
+
+    /**
+     * S5: media_exists() alone says nothing about permissions. A page editor
+     * who may not read a namespace must not be able to tell, from the
+     * rendered output, whether a file exists there or not - fetch.php itself
+     * returns an identical 403 for "denied" and "does not exist", so any
+     * difference here would be a disclosure invented by this plugin.
+     */
+    public function testAclDeniedDiagramIsIndistinguishableFromMissing()
+    {
+        $this->createMedia('restricted:present.png');
+
+        $this->enableAcl(
+            [
+                '*             @ALL   8',
+                'restricted:*  @ALL   0',
+            ],
+            'john',
+            ['user']
+        );
+
+        $html = $this->render('{{drawio>restricted:present}}');
+
+        $this->assertStringNotContainsString('fetch.php', $html);
+        $this->assertStringContainsString('blank-image.png', $html);
     }
 
     /**

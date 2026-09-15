@@ -68,6 +68,32 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
     }
 
     /**
+     * Whether the current user may actually read this media file.
+     *
+     * media_exists() is a pure filesystem check - it says nothing about
+     * permissions. Using it alone to choose between the real fetch.php URL
+     * and the placeholder turns this plugin into an existence oracle across
+     * ACL boundaries: fetch.php itself returns an identical 403 whether a
+     * file is denied or simply absent, so any difference in *our* output is
+     * a disclosure this plugin invents, not one core makes.
+     *
+     * The permission is decided on the namespace-wildcard ACL path the media
+     * id is actually governed by - media has no per-file ACLs. That is the
+     * whole body of core's mediaAclPath() (inc/auth.php), inlined because
+     * that helper does not exist on oldstable, whose own inc/media.php
+     * spells the identical expression out at the call sites that need it.
+     * action.php inlines it the same way, so both files ask the question
+     * exactly once and identically.
+     *
+     * @param string $media_id
+     * @return bool
+     */
+    private function mayReadMedia($media_id)
+    {
+        return auth_quickaclcheck(ltrim(getNS($media_id) . ':*', ':')) >= AUTH_READ;
+    }
+
+    /**
      * Render xhtml, metadata or odt (issue #7) output
      *
      * @param string        $mode     Renderer mode (supported modes: xhtml, metadata, odt)
@@ -165,6 +191,17 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         // top of that, not a substitute for it.
         $media_id = (new \dokuwiki\File\MediaResolver("$current_ns:deprecated"))->resolveId($media_id);
         $exists = media_exists($media_id, '', false);
+
+        // Security: a viewer who may not read this media must see the exact
+        // same thing as one where the file plain doesn't exist - anything
+        // else lets a page editor probe ACL-restricted namespaces file by
+        // file (see mayReadMedia() above). This intentionally does not touch
+        // metadata mode below: media-usage recording must happen regardless
+        // of who triggers the render (a save, the indexer, ...), exactly as
+        // core's own internalmedia()/_recordMediaUsage() do.
+        if ($exists && !$this->mayReadMedia($media_id)) {
+            $exists = false;
+        }
 
         // issue #66: saving an empty diagram leaves a zero-byte media file behind,
         // which is neither viewable nor (without this) clickable to fix again - treat

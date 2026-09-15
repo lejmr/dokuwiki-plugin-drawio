@@ -16,16 +16,23 @@ RUN ln -s /src /var/www/html/lib/plugins.core/drawio
 # still ends up with it - no manual step, no docker-seed script for a human to
 # forget to run.
 #
-# Pinned to the 2023-03-03 tag - the same release dokuwiki.org's plugin page
-# itself links to - rather than refs/heads/master, so a push to that branch
-# (or a GitHub outage) can't silently change _odtAddImage()'s contract or
-# break `docker compose up --build` for people who never touch ODT. Bump by
-# picking a newer tag from https://github.com/LarsGit223/dokuwiki-plugin-odt/tags
-# and updating both the tag and the extracted directory name below to match.
+# Pinned to the commit the 2023-03-03 tag pointed to when this was written -
+# the same release dokuwiki.org's plugin page itself links to - rather than
+# refs/heads/master or the tag name, because a tag is just a mutable ref: its
+# owner (or GitHub, or an account compromise) can repoint it to different
+# content without changing the URL below, and the build would silently pull
+# it in. A commit SHA can't be moved. A checksum pin would guard the same
+# thing, but for a dev-only image that never reaches a user's wiki (this
+# layer runs on the maintainer's own machine and CI, not on anyone's
+# production install) the SHA already gives an auditable, un-movable source -
+# no separate checksum to keep in sync when bumping. Bump by picking a newer
+# tag from https://github.com/LarsGit223/dokuwiki-plugin-odt/tags, resolving
+# it to a commit SHA, and updating both the SHA and the extracted directory
+# name below to match.
 RUN apt-get update && apt-get install -y --no-install-recommends unzip \
-    && curl -sL -o /tmp/odt.zip https://github.com/LarsGit223/dokuwiki-plugin-odt/archive/refs/tags/2023-03-03.zip \
+    && curl -sL -o /tmp/odt.zip https://github.com/LarsGit223/dokuwiki-plugin-odt/archive/3722444bfad5b514ba1672f91a1dcdb0a8b57df6.zip \
     && unzip -q /tmp/odt.zip -d /tmp/odt \
-    && mv /tmp/odt/dokuwiki-plugin-odt-2023-03-03 /var/www/html/lib/plugins.core/odt \
+    && mv /tmp/odt/dokuwiki-plugin-odt-3722444bfad5b514ba1672f91a1dcdb0a8b57df6 /var/www/html/lib/plugins.core/odt \
     && rm -rf /tmp/odt.zip /tmp/odt \
     && apt-get purge -y --auto-remove unzip \
     && rm -rf /var/lib/apt/lists/*
