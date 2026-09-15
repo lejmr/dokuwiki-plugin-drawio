@@ -186,6 +186,31 @@ class syntax_plugin_drawio_test extends DokuWikiTest
         $this->assertStringNotContainsString("alt=''", $html);
     }
 
+    /**
+     * The media manager lists where a file is used by reading the page's
+     * metadata. Without this the diagram looks unused (#10).
+     */
+    protected function mediaUsedOn($id, $text)
+    {
+        saveWikiText($id, $text, 'drawio test');
+
+        return (array) p_get_metadata($id, 'relation media', METADATA_RENDER_UNLIMITED);
+    }
+
+    public function testDiagramIsRecordedAsMediaUsedOnThePage()
+    {
+        $media = $this->mediaUsedOn('start', '{{drawio>test:tracked}}');
+
+        $this->assertArrayHasKey('test:tracked.png', $media);
+    }
+
+    public function testRelativeDiagramIsRecordedWithItsResolvedId()
+    {
+        $media = $this->mediaUsedOn('wiki:some:page', '{{drawio>tracked}}');
+
+        $this->assertArrayHasKey('wiki:some:tracked.png', $media);
+    }
+
     public function testEmptyMediaFileFallsBackToPlaceholder()
     {
         // issue #66: an empty diagram was saved, leaving a zero-byte file
