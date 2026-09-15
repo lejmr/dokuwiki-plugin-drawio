@@ -52,6 +52,7 @@ function buildSandbox() {
                 url: 'https://embed.diagrams.net/',
                 toolbar_possible_extension: ['png'],
                 zIndex: 999,
+                sectok: 'sek-test-default',
             },
             id: 'test:page',
         },
@@ -64,8 +65,8 @@ function buildSandbox() {
             // (drafts are driven straight through localStorage) - but .done()/
             // .fail() must be chainable, since script.js's 'save' post relies on
             // both (the draft is only cleared once the save succeeds).
-            post: (url, data) => {
-                const call = { url, data, failCb: null, doneCb: null };
+            post: (url, data, success) => {
+                const call = { url, data, failCb: null, doneCb: null, successCb: success || null };
                 postCalls.push(call);
                 const chain = {
                     fail: (cb) => { call.failCb = cb; return chain; },
@@ -339,3 +340,120 @@ console.log('OK: a non-JSON postMessage does not wedge the editor open (#5 JSON.
 }
 
 console.log('OK: a rejected save keeps the draft instead of losing the diagram');
+
+// --- regression test for S1: every ajax call must carry the security token
+//
+// The server-side ajax handler (action.php) is being hardened in parallel to
+// require DokuWiki's CSRF/security token as the `sectok` request param and
+// reject anything else. This drives as many of script.js's ajax call sites
+// as the harness can reach and asserts that *every* recorded post carries a
+// `sectok` matching JSINFO['plugin_drawio']['sectok'] - the assertion walks
+// every call generically rather than a hardcoded list of today's seven
+// actions, so a future call that forgets the token fails this too.
+{
+    const SECTOK = 'sek-9f8e7d';
+    const { sandbox, messageListeners, iframes, postCalls } = buildSandbox();
+    sandbox.JSINFO.plugin_drawio.sectok = SECTOK;
+    loadScript(sandbox);
+
+    // get_auth
+    sandbox.edit(makeImage('sectok.png'));
+
+    // draft_get (no local draft -> asks the server for an on-disk one)
+    sandbox.edit_cb(makeImage('sectok.png'));
+    const receive = messageListeners[messageListeners.length - 1];
+    const source = iframes[iframes.length - 1].contentWindow;
+
+    // init -> get_png (draft is still null: the stub never auto-invokes
+    // draft_get's callback, same as a request that hasn't come back yet)
+    receive({ source, data: JSON.stringify({ event: 'init' }) });
+
+    // autosave -> draft_save
+    receive({ source, data: JSON.stringify({ event: 'autosave', xml: '<mxGraphModel/>' }) });
+
+    // save (drawio's own pre-export event) -> draft_save again
+    receive({ source, data: JSON.stringify({ event: 'save', xml: '<mxGraphModel/>' }) });
+
+    // export -> save, then its .done() -> draft_rm cleanup
+    receive({
+        source,
+        data: JSON.stringify({ event: 'export', format: 'xmlpng', data: 'data:image/png;base64,Zm9v' }),
+    });
+    const saveCall = postCalls.find((c) => c.data && c.data.action === 'save');
+    assert.ok(saveCall && typeof saveCall.doneCb === 'function', 'test setup: save must be postable');
+    saveCall.doneCb();
+
+    // a second diagram, as .svg, to reach the get_svg action
+    const svg = buildSandbox();
+    svg.sandbox.JSINFO.plugin_drawio.sectok = SECTOK;
+    svg.sandbox.JSINFO.plugin_drawio.toolbar_possible_extension = ['svg'];
+    loadScript(svg.sandbox);
+    svg.sandbox.edit_cb(makeImage('sectok.svg'));
+    const svgReceive = svg.messageListeners[svg.messageListeners.length - 1];
+    const svgSource = svg.iframes[svg.iframes.length - 1].contentWindow;
+    svgReceive({ source: svgSource, data: JSON.stringify({ event: 'init' }) });
+
+    const allCalls = postCalls.concat(svg.postCalls);
+    const actionsSeen = allCalls.map((c) => c.data && c.data.action);
+    ['get_auth', 'draft_get', 'get_png', 'draft_save', 'save', 'draft_rm', 'get_svg'].forEach((a) => {
+        assert.ok(actionsSeen.includes(a), 'test setup: expected to exercise action ' + a);
+    });
+
+    allCalls.forEach((c) => {
+        assert.strictEqual(c.data && c.data.sectok, SECTOK,
+            "ajax call missing/wrong sectok (action: '" + (c.data && c.data.action) + "')");
+    });
+}
+
+console.log('OK: every ajax call carries the DokuWiki security token (sectok)');
+
+// --- regression test for S6: SVG export must not innerHTML raw markup ----
+//
+// edit_cb()'s 'export' handler used to decode the data URI drawio's iframe
+// posts back and assign it straight into the page with element.innerHTML =
+// imgData. That content comes from the editor iframe (ultimately, from
+// whatever diagram content someone fed into it) and inline event handlers
+// (onload, onerror, ...) fire on markup inserted this way - lib/exe/fetch.php
+// sends a strict CSP, but this path never goes through it, and doku.php
+// sends no CSP at all. This drives the 'export'/'svg' branch directly and
+// asserts the DOM node it produces was never handed raw markup via
+// innerHTML, and that a handler embedded in the payload never runs.
+{
+    const { sandbox, messageListeners, iframes } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('malicious.svg'));
+    const receive = messageListeners[messageListeners.length - 1];
+    const source = iframes[iframes.length - 1].contentWindow;
+
+    // the DOM node the export handler looks up (via document.getElementById)
+    // and replaces - a plain stub, not a real DOM, since this harness has no
+    // browser
+    let replaced = null;
+    const tdElement = { id: 'malicious.svg', parentNode: null };
+    const trElement = {
+        style: {},
+        replaceChild: (newNode) => { replaced = newNode; },
+    };
+    tdElement.parentNode = trElement;
+    sandbox.document.getElementById = (id) => (id === 'malicious.svg' ? tdElement : null);
+    // createElement('img') needs its own stub distinct from the generic
+    // iframe stub above (which lacks a settable .src)
+    sandbox.document.createElement = (tag) => (
+        tag === 'img' ? { setAttribute() {} } : { setAttribute() {}, contentWindow: { postMessage() {} } }
+    );
+
+    const payload = '<svg onload="window.pwned = true"><a href="x">y</a></svg>';
+    const svgDataUri = 'data:image/svg+xml;base64,' + Buffer.from(payload).toString('base64');
+    receive({ source, data: JSON.stringify({ event: 'export', format: 'svg', data: svgDataUri }) });
+
+    assert.ok(replaced, 'the export handler must still replace the diagram DOM node');
+    assert.strictEqual(replaced.innerHTML, undefined,
+        'raw SVG markup must never be assigned via innerHTML');
+    assert.strictEqual(replaced.src, svgDataUri,
+        'the freshly saved SVG must be loaded as an <img> src, not inlined as markup');
+    assert.strictEqual(sandbox.window.pwned, undefined,
+        'a handler embedded in the SVG payload must never execute');
+}
+
+console.log('OK: SVG export does not inject raw markup into the page (S6)');

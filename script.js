@@ -10,6 +10,45 @@
 function drawioConf() {
     return (typeof JSINFO !== 'undefined' && JSINFO['plugin_drawio']) ? JSINFO['plugin_drawio'] : null;
 }
+
+// Every ajax call to this plugin must carry DokuWiki's CSRF/security token
+// (published as JSINFO['plugin_drawio']['sectok']) as the `sectok` request
+// param - the server-side handler now requires a valid one and rejects
+// anything else. Routing every call through this one helper means a call
+// added here in the future can't forget it (see _test/script.test.js, which
+// checks every post ever made, not just today's seven actions).
+//
+// `silent` is for the handful of calls that were already best-effort before
+// this fix (autosave, draft cleanup) or that already have their own, more
+// specific .fail() handler ('save', below) - everything else alerts on
+// failure here, so a rejected token (or any other failure) is never mistaken
+// for success.
+function drawioPost(action, imageName, extraData, success, silent)
+{
+    var conf = drawioConf();
+    var data = {
+        call: 'plugin_drawio',
+        imageName: imageName,
+        action: action,
+        sectok: conf ? conf['sectok'] : ''
+    };
+    if (extraData) {
+        for (var key in extraData) {
+            if (Object.prototype.hasOwnProperty.call(extraData, key)) {
+                data[key] = extraData[key];
+            }
+        }
+    }
+    var req = jQuery.post(DOKU_BASE + 'lib/exe/ajax.php', data, success);
+    if (!silent) {
+        req.fail(function () {
+            alert('drawio: the request to the server failed (action: ' + action + '). ' +
+                'Your action was NOT completed.');
+        });
+    }
+    return req;
+}
+
 var toolbarPossibleExtension = drawioConf() ? drawioConf()['toolbar_possible_extension'] : [];
 var initial = null;
 var currentDiagramId = null;
@@ -26,18 +65,10 @@ function edit(image)
 {   
     // check auth
     var imgPointer = image;
-    jQuery.post(
-        DOKU_BASE + 'lib/exe/ajax.php',
-        {
-            call: 'plugin_drawio', 
-            imageName: imgPointer.getAttribute('id'),
-            action: 'get_auth'
-        },
-		function(data) {
-			if (data != 'true') return;
-			edit_cb(imgPointer);
-		}
-	);
+    drawioPost('get_auth', imgPointer.getAttribute('id'), null, function (data) {
+        if (data != 'true') return;
+        edit_cb(imgPointer);
+    });
 }
 
 function edit_cb(image)
@@ -84,39 +115,25 @@ function edit_cb(image)
     // Prefer the draft from browser cache
     if(draft == null){
         // Try to find on-disk stored draft file
-        jQuery.post(
-            DOKU_BASE + 'lib/exe/ajax.php',
-            {
-                call: 'plugin_drawio', 
-                imageName: imagePointer.getAttribute('id'),
-                action: 'draft_get'
-            },
-            function(data) {
-                if (data.content != 'NaN') {
+        drawioPost('draft_get', imagePointer.getAttribute('id'), null, function (data) {
+            if (data.content != 'NaN') {
 
-                    // Set draft from received data
-                    draft = data;
+                // Set draft from received data
+                draft = data;
 
-                    // Handle the discard - remove on disk
-                    if (!confirm("A version of this diagram from " + new Date(data.lastModified) + " is available. Would you like to continue editing?"))
-                    {   
-                        // clean draft variable
-                        draft = null;
+                // Handle the discard - remove on disk
+                if (!confirm("A version of this diagram from " + new Date(data.lastModified) + " is available. Would you like to continue editing?"))
+                {
+                    // clean draft variable
+                    draft = null;
 
-                         // Remove all draft files
-                        jQuery.post(
-                            DOKU_BASE + 'lib/exe/ajax.php',
-                            {
-                                call: 'plugin_drawio', 
-                                imageName: imagePointer.getAttribute('id'),
-                                action: 'draft_rm'
-                            }
-                        );
-                    }
+                     // Remove all draft files - best-effort, same as the other
+                     // draft_rm call sites below.
+                    drawioPost('draft_rm', imagePointer.getAttribute('id'), null, null, true);
                 }
             }
-        );
-    } 
+        });
+    }
     else 
     {
 
@@ -165,34 +182,18 @@ function edit_cb(image)
                 {                    
                     if (imageFormat == 'png')
                     {
-                        jQuery.post(
-                            DOKU_BASE + 'lib/exe/ajax.php',
-                            {
-                                call: 'plugin_drawio', 
-                                imageName: imagePointer.getAttribute('id'),
-                                action: 'get_png'
-                            },
-                            function(data){
-                                iframe.contentWindow.postMessage(JSON.stringify({action: 'load',
-                                    autosave: 1, xmlpng: data.content}), '*');
-                            }
-                        );
+                        drawioPost('get_png', imagePointer.getAttribute('id'), null, function (data) {
+                            iframe.contentWindow.postMessage(JSON.stringify({action: 'load',
+                                autosave: 1, xmlpng: data.content}), '*');
+                        });
                     }
                     else if (imageFormat == 'svg')
                     {
-                        jQuery.post(
-                            DOKU_BASE + 'lib/exe/ajax.php',
-                            {
-                                call: 'plugin_drawio', 
-                                imageName: imagePointer.getAttribute('id'),
-                                action: 'get_svg'
-                            },
-                            function(data){
-                                //var svg = new XMLSerializer().serializeToString(data.content.firstChild);
-                                iframe.contentWindow.postMessage(JSON.stringify({action: 'load',
-                                    autosave: 1, xml: data.content}), '*');
-                            }
-                        );
+                        drawioPost('get_svg', imagePointer.getAttribute('id'), null, function (data) {
+                            //var svg = new XMLSerializer().serializeToString(data.content.firstChild);
+                            iframe.contentWindow.postMessage(JSON.stringify({action: 'load',
+                                autosave: 1, xml: data.content}), '*');
+                        });
                     }
 					else {
                         console.log('error extension not compatible');
@@ -207,18 +208,39 @@ function edit_cb(image)
                     imgData = msg.data ;
                     image.setAttribute('src', imgData);
                 }
-                else if (msg.format == 'svg') 
+                else if (msg.format == 'svg')
                 {
-                    // Extracts SVG DOM from data URI to enable links
-                    imgData = atob(msg.data.substring(msg.data.indexOf(',') + 1));
+                    // Used to decode the data URI and inline the raw SVG
+                    // markup into the page via innerHTML, to keep links
+                    // inside the diagram clickable. That markup comes
+                    // straight from the editor iframe, and innerHTML runs
+                    // inline event handlers (onload, onerror, ...) on
+                    // whatever it inserts, in the wiki's own origin -
+                    // lib/exe/fetch.php sends a strict CSP, but this path
+                    // never goes through it, and doku.php sends none at all.
+                    //
+                    // Load it as an <img> instead, the same way the PNG
+                    // branch above already does: a data: URI in an <img src>
+                    // is decoded in image context, which never executes
+                    // scripts or handlers inside it.
+                    //
+                    // User-visible change: links inside an SVG diagram were
+                    // only ever clickable in this specific post-save state,
+                    // until the next full page load - render() in syntax.php
+                    // emits a plain <img> for every SVG diagram too, so a
+                    // reload already made them unclickable again. This drops
+                    // that transient window; a normal page view/reload is
+                    // unaffected. Rendering wiki [[links]] *inside* a diagram
+                    // (issue #61) is a different, larger feature and is not
+                    // affected either way by this change.
                     var tdElement = document.getElementById(image.id);
-                    var trElement=  tdElement.parentNode;
-                    var svgImg= document.createElement('svg');
+                    var trElement = tdElement.parentNode;
+                    var svgImg = document.createElement('img');
                     svgImg.setAttribute("class","mediacenter");
                     svgImg.setAttribute("style","max-width:100%;cursor:pointer;");
                     svgImg.setAttribute('onclick','edit(this);');
-                    svgImg.id=image.id;
-                    svgImg.innerHTML=imgData;
+                    svgImg.id = image.id;
+                    svgImg.src = msg.data;
                     trElement.replaceChild(svgImg,tdElement);
                     trElement.style.textAlign = "center" ;
                 }
@@ -233,15 +255,8 @@ function edit_cb(image)
                 // extension, bad payload, no permission), the user's change would
                 // exist nowhere at all - not on disk, not in the draft - and that
                 // is exactly the case the draft exists to cover.
-                jQuery.post(
-                    DOKU_BASE + 'lib/exe/ajax.php',
-                    {
-                        call: 'plugin_drawio',
-                        imageName: imagePointer.getAttribute('id'),
-                        content: msg.data,
-                        action: 'save'
-                    }
-                ).done(function() {
+                drawioPost('save', imagePointer.getAttribute('id'), { content: msg.data }, null, true)
+                .done(function() {
                     localStorage.removeItem('.draft-' + currentDiagramId);
                     draft = null;
 
@@ -249,14 +264,8 @@ function edit_cb(image)
                     // not worth alerting over; a failure here just means a stale
                     // draft lingers (offering to restore it next time this
                     // diagram opens).
-                    jQuery.post(
-                        DOKU_BASE + 'lib/exe/ajax.php',
-                        {
-                            call: 'plugin_drawio',
-                            imageName: imagePointer.getAttribute('id'),
-                            action: 'draft_rm'
-                        }
-                    ).fail(function() {
+                    drawioPost('draft_rm', imagePointer.getAttribute('id'), null, null, true)
+                    .fail(function() {
                         console.log('drawio: draft_rm failed, a stale draft may linger');
                     });
                 }).fail(function() {
@@ -276,16 +285,9 @@ function edit_cb(image)
                 dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
                 localStorage.setItem('.draft-' + currentDiagramId, dr);
 
-                // Save on-disk
-                jQuery.post(
-                    DOKU_BASE + 'lib/exe/ajax.php',
-                    {
-                        call: 'plugin_drawio', 
-                        imageName: imagePointer.getAttribute('id'),
-                        content: dr,
-                        action: 'draft_save'
-                    }
-                );
+                // Save on-disk - best-effort, same as the other draft_save/
+                // draft_rm calls (a failure here just means a stale draft).
+                drawioPost('draft_save', imagePointer.getAttribute('id'), { content: dr }, null, true);
             }
             else if (msg.event == 'save')
             {
@@ -304,31 +306,16 @@ function edit_cb(image)
                     dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
                     localStorage.setItem('.draft-' + currentDiagramId, dr);
                 }
-                // Save on-disk
-                jQuery.post(
-                    DOKU_BASE + 'lib/exe/ajax.php',
-                    {
-                        call: 'plugin_drawio', 
-                        imageName: imagePointer.getAttribute('id'),
-                        content: dr,
-                        action: 'draft_save'
-                    }
-                );
+                // Save on-disk - best-effort, see above.
+                drawioPost('draft_save', imagePointer.getAttribute('id'), { content: dr }, null, true);
             }
             else if (msg.event == 'exit')
             {
                 localStorage.removeItem('.draft-' + currentDiagramId);
                 draft = null;
 
-                // Remove all draft files
-                jQuery.post(
-                    DOKU_BASE + 'lib/exe/ajax.php',
-                    {
-                        call: 'plugin_drawio', 
-                        imageName: imagePointer.getAttribute('id'),
-                        action: 'draft_rm'
-                    }
-                );
+                // Remove all draft files - best-effort, see above.
+                drawioPost('draft_rm', imagePointer.getAttribute('id'), null, null, true);
 
                 // Final close (dont know why though)
                 close();

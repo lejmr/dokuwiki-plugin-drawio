@@ -9,15 +9,19 @@ on:
     # before users report it.
     - cron: '17 4 * * 1'
 
+# No job needs anything but read access to the repo checkout.
+permissions:
+  contents: read
+
 jobs:
   metadata:
     name: metadata & lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0   # check-plugin-info.sh compares against the git log
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2 (2.37.2)
         with:
           php-version: '8.3'
       # A release is cut from master, so the date is enforced there and only
@@ -44,8 +48,8 @@ jobs:
       matrix:
         dokuwiki: [master, stable, oldstable]
     steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2 (2.37.2)
         with:
           php-version: '8.3'
           extensions: dom, json, mbstring
