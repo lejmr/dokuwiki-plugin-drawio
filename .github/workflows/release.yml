@@ -155,7 +155,18 @@ jobs:
             echo "lastupdate   : $v"
             # The releases CI actually gates on (stable + oldstable above;
             # master is informational and is not itself a release).
-            echo 'compatible   : 2025-05-14, Librarian; 2026-07-14, Mort'
+            # Derived from the DokuWiki checkouts the tests above just ran
+            # against (oldstable and stable), never typed by hand - so the
+            # listing can only claim what this very run proved.
+            # VERSION reads like: 2026-07-14c "Mort"
+            compat=""
+            for b in oldstable stable; do
+              ver=$(cat ".cache/dokuwiki-$b/VERSION")
+              rel=$(echo "$ver" | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}')
+              name=$(echo "$ver" | grep -oE '"[^"]+"' | tr -d '"')
+              compat="${compat:+$compat; }$rel, $name"
+            done
+            echo "compatible   : $compat"
             echo 'depends      :'
             echo 'conflicts    :'
             echo 'similar      :'
@@ -182,15 +193,9 @@ jobs:
 
       - name: assemble the release body
         run: |
-          {
-            cat release-notes.md
-            echo
-            echo '## For the dokuwiki.org plugin page'
-            echo
-            echo 'Paste this over the `---- plugin ----` block:'
-            echo
-            cat plugin-block.md
-          } > release-body.md
+          # Release notes are for people running the plugin; the dokuwiki.org
+          # block is maintainer-only and lives in the job summary above.
+          cp release-notes.md release-body.md
 
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
