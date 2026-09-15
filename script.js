@@ -49,6 +49,41 @@ function drawioPost(action, imageName, extraData, success, silent)
     return req;
 }
 
+// The local draft is a convenience cache (#32/#57): a large diagram makes
+// localStorage.setItem() throw QuotaExceededError, and an unguarded throw
+// here used to abort the postMessage handler mid-way, breaking the very
+// save/autosave it was piggybacking on. The server-side draft (draft_save,
+// posted right after every one of these calls) is the durable copy, so a
+// failed local write is swallowed rather than allowed to stop anything
+// downstream of it.
+function drawioLocalStorageGet(key)
+{
+    try {
+        return localStorage.getItem(key);
+    } catch (e) {
+        console.log('drawio: localStorage.getItem failed, continuing without a local draft', e);
+        return null;
+    }
+}
+
+function drawioLocalStorageSet(key, value)
+{
+    try {
+        localStorage.setItem(key, value);
+    } catch (e) {
+        console.log('drawio: localStorage.setItem failed (quota?), continuing without a local draft', e);
+    }
+}
+
+function drawioLocalStorageRemove(key)
+{
+    try {
+        localStorage.removeItem(key);
+    } catch (e) {
+        console.log('drawio: localStorage.removeItem failed, continuing', e);
+    }
+}
+
 var toolbarPossibleExtension = drawioConf() ? drawioConf()['toolbar_possible_extension'] : [];
 var initial = null;
 var currentDiagramId = null;
@@ -209,7 +244,7 @@ function edit_cb(image)
     // left the exported image as the only copy of the diagram's source.
     var pendingXml = null;
 
-    var draft = localStorage.getItem('.draft-' + currentDiagramId);
+    var draft = drawioLocalStorageGet('.draft-' + currentDiagramId);
 
     // Prefer the draft from browser cache
     if(draft == null){
@@ -244,7 +279,7 @@ function edit_cb(image)
             // Discard it for good, exactly like the server-fetched branch
             // above does - otherwise the same stale draft is offered again on
             // every open of this diagram.
-            localStorage.removeItem('.draft-' + currentDiagramId);
+            drawioLocalStorageRemove('.draft-' + currentDiagramId);
             drawioPost('draft_rm', imagePointer.getAttribute('id'), null, null, true);
         }
     }
@@ -376,7 +411,7 @@ function edit_cb(image)
                 if (pendingXml) payload.xml = pendingXml;
                 drawioPost('save', imagePointer.getAttribute('id'), payload, null, true)
                 .done(function() {
-                    localStorage.removeItem('.draft-' + currentDiagramId);
+                    drawioLocalStorageRemove('.draft-' + currentDiagramId);
                     draft = null;
 
                     // Remove all draft files - best-effort scratch-file cleanup,
@@ -402,7 +437,7 @@ function edit_cb(image)
             else if (msg.event == 'autosave')
             {
                 dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
-                localStorage.setItem('.draft-' + currentDiagramId, dr);
+                drawioLocalStorageSet('.draft-' + currentDiagramId, dr);
 
                 // Save on-disk - best-effort, same as the other draft_save/
                 // draft_rm calls (a failure here just means a stale draft).
@@ -417,21 +452,21 @@ function edit_cb(image)
                     iframe.contentWindow.postMessage(JSON.stringify({action: 'export',
                     format: 'xmlpng', xml: msg.xml, spin: 'Updating page'}), '*');
                     dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
-                    localStorage.setItem('.draft-' + currentDiagramId, dr);
+                    drawioLocalStorageSet('.draft-' + currentDiagramId, dr);
                 } 
                 else if (imageFormat ==='svg') 
                 {
                     iframe.contentWindow.postMessage(JSON.stringify({action: 'export',
                     format: 'xmlsvg', xml: msg.xml, spin: 'Updating page'}), '*');
                     dr = JSON.stringify({lastModified: new Date(), xml: msg.xml});
-                    localStorage.setItem('.draft-' + currentDiagramId, dr);
+                    drawioLocalStorageSet('.draft-' + currentDiagramId, dr);
                 }
                 // Save on-disk - best-effort, see above.
                 drawioPost('draft_save', imagePointer.getAttribute('id'), { content: dr }, null, true);
             }
             else if (msg.event == 'exit')
             {
-                localStorage.removeItem('.draft-' + currentDiagramId);
+                drawioLocalStorageRemove('.draft-' + currentDiagramId);
                 draft = null;
 
                 // Remove all draft files - best-effort, see above.
