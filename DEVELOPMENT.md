@@ -26,21 +26,40 @@ it ever ships with the plugin.
 
 ## Run the tests
 
+The PHP suite is split into two tiers, in `_test/golden/` and `_test/extra/`:
+
+- **`_test/golden/`** is the happy path - one test per feature, ~24 tests,
+  each through the real entry point (`ajax.php` with a security token,
+  `p_render`/`p_get_metadata`, `idx_lookup`, the odt renderer) with realistic
+  data. It runs in seconds and must always be green: if golden is red,
+  nothing else is worth reading. A test only belongs here if it goes through
+  that real entry point and proves what a user observes - everything else
+  (edge cases, rejected input, security regressions, admin negatives, unit
+  tests) belongs in `_test/extra/` instead.
+- **`_test/extra/`** is everything else that earns its place: one regression
+  test per `SECURITY.md` claim, rejected-input variants, the whole-data-
+  directory delta assertions, attic format details, helper unit tests, config
+  metadata, admin batching/negatives, failure paths, lock edge cases.
+
 ```sh
-bin/test.sh              # DokuWiki stable
-bin/test.sh master       # development branch
+bin/test.sh                  # whole suite, DokuWiki stable
+bin/test.sh master            # development branch
 bin/test.sh oldstable
+bin/test.sh stable golden     # just the fast golden tier
 ```
 
 No PHP needed on the host - the script runs PHPUnit in a container against a
 real DokuWiki checkout (cached in `.cache/`, safe to delete).
 
-`bin/run-tests.sh` is the same thing without docker and is what CI runs.
+`bin/run-tests.sh [branch] [golden]` is the same thing without docker and is
+what CI runs (golden first, as its own fast-fail step, then the full suite).
 
-The JavaScript side has its own check, which needs nothing but node:
+The JavaScript side has the same golden/extra split, needing nothing but
+node:
 
 ```sh
-node _test/script.test.js
+node _test/golden/script.test.js   # fast, one check per feature
+node _test/extra/script.test.js    # edge cases, security regressions, implementation details
 ```
 
 ## Before releasing
@@ -52,6 +71,54 @@ bin/bump-date.sh           # sets the date DokuWiki's updater compares against
 
 A stale date in `plugin.info.txt` means installed wikis never see the update
 (issue #67), so CI fails the build when plugin code is newer than that date.
+
+## Verifying a change
+
+These rules exist because each was learned the hard way, in one evening, after
+a reviewer had already signed the work off.
+
+**Load it in a real browser.** PHP tests run no JavaScript, and `curl` executes
+none either. Anything that ships JS must be opened in a browser with the console
+captured, in every context it can load: an article page, the media manager, an
+admin page, the editor. Headless Chrome is enough:
+
+```sh
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --headless=new --disable-gpu --no-sandbox --virtual-time-budget=8000 \
+  --enable-logging=stderr --v=1 --dump-dom "http://localhost:8080/..." 2>&1 >/dev/null | grep CONSOLE
+```
+
+A crash on the media manager went unnoticed through five rounds of review this
+way: `JSINFO.id` is `null` there, the plugin threw at load, and the throw killed
+every plugin script after it in DokuWiki's concatenated bundle — including the
+plugin's own media manager button.
+
+**A function that works when you call it may never have run.** JavaScript hoists
+function declarations, so a broken script still leaves working functions behind.
+Assert that the *registration* happened, not that the function exists.
+
+**Assert that the next script still runs.** Anything this plugin ships lands in
+one bundle with every other plugin's JavaScript. A test that concatenates a
+marker after `script.js` and checks the marker still executes catches an entire
+class of bug that no unit test will.
+
+**Make the stubs hostile.** A sandbox that always hands the code a complete,
+well-formed `JSINFO` hides exactly the failures that happen in production. Feed
+it what the real environment produces, including `id: null` and missing keys.
+
+**Test the user's path, not the mechanism.** "It works when invoked" is not the
+same as "it works." If a step needs a manual reindex, a cache purge or a file
+planted by hand to pass, that is a failure, not test setup. Two bugs hid behind
+this distinction: saving a diagram never reindexed the pages that embed it, and
+never expired their cached ODT export, because saving a diagram touches no page.
+
+**Start from nothing.** Validate on a fresh volume (`docker compose down -v`),
+with nothing placed by hand. Anything the walkthrough needs must be seeded by
+the repository — otherwise it works on one machine and nowhere else.
+
+**Validate the checklist before handing it to someone.** A list of things to
+click is a deliverable like any other, and shipping one that was never run wastes
+the reviewer's time and trust.
 
 ## CI
 

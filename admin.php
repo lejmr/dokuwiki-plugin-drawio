@@ -382,10 +382,26 @@ class admin_plugin_drawio extends AdminPlugin
         foreach (array_keys($pages) as $page) {
             @set_time_limit(30);
             try {
-                idx_addPage($page, false, true);
+                $this->helper->reindexPage($page);
             } catch (\Throwable $e) {
                 // one page's reindex failing must not stop the rest, or
                 // turn a successful batch of conversions into a fatal error
+            }
+            // Same stale-cache problem action.php's save path has, and the
+            // same fix - see helper::purgeDiagramPageCache() for the full
+            // reasoning (which formats, why xhtml is skipped, and why a
+            // glob over CacheRenderer's own naming scheme rather than a
+            // hand-rolled delete). A source appearing for the first time
+            // does not itself change any embedding page's bytes, but a
+            // wiki running this task is exactly the wiki whose ODT exports
+            // were stale before there was a source to extract from - this
+            // is the only path that stops any of them staying stale after
+            // the migration that fixes that runs.
+            try {
+                $this->helper->purgeDiagramPageCache($page);
+            } catch (\Throwable $e) {
+                // one page's purge failing must not stop the rest, or turn
+                // a successful batch of conversions into a fatal error
             }
         }
     }

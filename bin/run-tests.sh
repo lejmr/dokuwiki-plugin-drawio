@@ -2,10 +2,13 @@
 # Run the plugin's PHPUnit tests against a DokuWiki checkout.
 # Needs php + composer + git on PATH. Use bin/test.sh to run it in docker.
 #
-#   bin/run-tests.sh [master|stable|oldstable]   (default: stable)
+#   bin/run-tests.sh [master|stable|oldstable] [golden]
+#     (branch defaults to stable; pass "golden" as the second argument to
+#     run only the fast _test/golden tier instead of the whole tree)
 set -eu
 
 BRANCH="${1:-stable}"
+TIER="${2:-}"
 # Friendly names (same spelling as the docker image tags) -> git branches.
 case "$BRANCH" in
     oldstable) REF=old-stable ;;
@@ -38,6 +41,11 @@ for entry in "$PLUGIN_DIR"/*; do
     cp -R "$entry" "$DEST/"
 done
 
-echo "==> running tests"
+TARGET=../lib/plugins/drawio/_test
+if [ "$TIER" = "golden" ]; then
+    TARGET=../lib/plugins/drawio/_test/golden
+fi
+
+echo "==> running tests ($TARGET)"
 cd "$CACHE/_test"
-exec php vendor/bin/phpunit --stderr --colors=never --test-suffix .test.php,Test.php ../lib/plugins/drawio/_test
+exec php vendor/bin/phpunit --stderr --colors=never --test-suffix .test.php,Test.php "$TARGET"

@@ -237,6 +237,11 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         // so - unlike xhtml - it has no choice but to work out existence and
         // permission right here.
         if ($mode === 'odt') {
+            // What gets embedded depends on *who* exports (mayReadMedia()
+            // below), but the odt plugin caches its render per page, not per
+            // viewer - so the first exporter's result would be served to
+            // everyone after. Opt this page out of that cache.
+            $renderer->nocache();
             $exists = media_exists($media_id, '', false);
 
             // Security: an export must not embed a diagram the exporting user

@@ -39,4 +39,11 @@ if [ -n "$code" ] && [ "$date" \< "$code" ]; then
 fi
 
 [ "$fail" -eq 0 ] && echo "OK $INFO (date $date)"
+
+# Same "shipping the repo wrong" class of bug as the date check above, so it
+# runs from here rather than adding a third CI step - see check-archive.sh's
+# own header for what it checks. Always strict (no --warn): unlike the date,
+# a leaking archive is wrong on every commit, not just at release time.
+./bin/check-archive.sh || fail=1
+
 exit "$fail"

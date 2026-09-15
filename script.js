@@ -125,16 +125,11 @@ function edit_cb(image)
 
     imagePointer = image;
     currentDiagramId = imagePointer.getAttribute('id');
-    imageFormat = imagePointer.getAttribute('id').split('.');
-    if (imageFormat.length>2) {
-        alert('File name format or extension error: should be filename.extension (available extension :' + toolbarPossibleExtension + ')');
-        return;
-    } else if (imageFormat.length == 1) {
-        console.info('use default exention png');
-        imageFormat = "png";
-    } else {
-        imageFormat=imageFormat.pop();
-    }
+    // The extension is whatever follows the LAST dot. Splitting on every dot
+    // refused names like ns:release-v1.2.png with an alert (a fork carried
+    // the fix for three years); a dot inside a namespace never counts either.
+    var idParts = imagePointer.getAttribute('id').split(/\.(?=[^.:]*$)/);
+    imageFormat = idParts.length < 2 ? 'png' : idParts[1].toLowerCase();
 
     var iframe = document.createElement('iframe');
     iframe.setAttribute('frameborder', '0');
@@ -246,6 +241,11 @@ function edit_cb(image)
         if (!confirm("A version of this diagram from " + new Date(draft.lastModified) + " is available. Would you like to continue editing?"))
         {
             draft = null;
+            // Discard it for good, exactly like the server-fetched branch
+            // above does - otherwise the same stale draft is offered again on
+            // every open of this diagram.
+            localStorage.removeItem('.draft-' + currentDiagramId);
+            drawioPost('draft_rm', imagePointer.getAttribute('id'), null, null, true);
         }
     }
     
@@ -487,7 +487,17 @@ function getImageName(){
  };
 
 
-if (typeof window.toolbar !== 'undefined') {
+// window.toolbar exists on the editor toolbar of an article page, but also
+// on pages that have no current page id at all - the media manager among
+// them (JSINFO.id is null there, verified against the real response: `curl
+// .../lib/exe/mediamanager.php` prints "id":null). getImageName() calls
+// JSINFO.id.split(':'), so registering a toolbar item that opens
+// {{drawio>...}} with no page to insert it into is both meaningless and, via
+// that split() on null, exactly the load-time throw the comment at the top
+// of this file warns about (it killed core's own styling/usermanager/
+// locktimer code after it, the same failure mode as #16). Skip the whole
+// block when there is no page id to build a link for.
+if (typeof window.toolbar !== 'undefined' && JSINFO && typeof JSINFO.id === 'string' && JSINFO.id) {
     // toobar definition in case of multi extension defined in conf
     if (toolbarPossibleExtension.length >1 ) {
         toolbar[toolbar.length] = {
@@ -582,13 +592,24 @@ function drawioAddMediaManagerButton() {
         return;
     }
 
+    // Matches core's own markup for Delete/Upload new version - a
+    // <li><div class="no"><button>...</button></div></li> built by
+    // media_preview_buttons() in inc/media.php - so this control inherits
+    // the same styling (ul.actions li { display: inline } from the
+    // template, div.no { display: inline; margin/padding: 0 } from
+    // lib/styles/all.css - both apply regardless of a <form>) with no CSS
+    // of our own. Unlike core's buttons this isn't wrapped in a <form>:
+    // there is nothing here to POST to (edit() is a client-side action, not
+    // a server round trip), and type="button" - not "submit" - means a
+    // click can never submit or navigate even if something later wraps it
+    // in a form.
     var $li = jQuery('<li class="drawio__mmbtn"></li>');
-    var $link = jQuery('<a href="#"></a>').text(conf['editbutton']);
-    $link.on('click', function (e) {
+    var $button = jQuery('<button type="button"></button>').text(conf['editbutton']);
+    $button.on('click', function (e) {
         e.preventDefault();
         edit(target);
     });
-    $li.append($link);
+    $li.append(jQuery('<div class="no"></div>').append($button));
     jQuery('div.file ul.actions').append($li);
 }
 

@@ -26,7 +26,7 @@ model, the advisory lock, and the bulk conversion in the admin menu.
 bin/test.sh            # DokuWiki stable
 bin/test.sh master     # development branch
 bin/test.sh oldstable
-node _test/script.test.js
+node _test/golden/script.test.js   # then _test/extra/script.test.js
 ```
 
 122 PHP tests and 19 JavaScript checks, green on all three DokuWiki branches.
