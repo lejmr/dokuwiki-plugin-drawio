@@ -109,7 +109,12 @@ workflow above, are also there to run by hand while developing.
 ## Verifying a change
 
 These rules exist because each was learned the hard way, in one evening, after
-a reviewer had already signed the work off.
+a reviewer had already signed the work off. The whole process - roles, the
+validation plan with its evidence and stop rules, the batch format for the
+maintainer - is written up as a Claude Code skill in
+`.claude/skills/validated-change/` so that any agent (and any model) working
+on this repository follows it; the rules below are the part of it that
+applies to a single change.
 
 **Load it in a real browser.** PHP tests run no JavaScript, and `curl` executes
 none either. Anything that ships JS must be opened in a browser with the console
