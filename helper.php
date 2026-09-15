@@ -148,6 +148,39 @@ class helper_plugin_drawio extends DokuWiki_Plugin
     }
 
     /**
+     * The rendering ids a .drawio source could belong to, in preference
+     * order.
+     *
+     * The reverse of sourceID(): 'ns:plan.drawio' -> ['ns:plan.png',
+     * 'ns:plan.svg']. Media manager's "Edit with draw.io" button has to open
+     * *some* rendering when the source itself is clicked - script.js's
+     * whole editor flow (get_png/get_svg, save's extension gate, lock's id)
+     * is keyed to a png/svg id, never to the source - so a click on the
+     * source has to resolve to one before any of that runs.
+     *
+     * png first, deliberately: it is the fixed default this plugin already
+     * falls back to everywhere else an extension has to be chosen for it -
+     * syntax.php appends '.png' to an extensionless {{drawio>...}} call, and
+     * script.js's own edit_cb() does the same for an id with no extension at
+     * all. Consistent with that default rather than inventing a second one
+     * here. action.php's 'resolve_source' action prefers whichever of these
+     * two actually exists on disk over this order - see its own comment.
+     *
+     * Pure id computation, same as otherRenderingID() - no filesystem
+     * access, callers decide what "exists" means for their own purpose.
+     *
+     * @param string $src_id e.g. 'ns:plan.drawio'
+     * @return array         e.g. ['ns:plan.png', 'ns:plan.svg'], or [] if
+     *                        $src_id is not itself a .drawio id
+     */
+    public function renderingCandidates($src_id)
+    {
+        if (strtolower(pathinfo($src_id, PATHINFO_EXTENSION)) !== 'drawio') return [];
+        $base = substr($src_id, 0, -strlen('drawio'));
+        return [$base . 'png', $base . 'svg'];
+    }
+
+    /**
      * Whether this looks like the XML draw.io hands out.
      *
      * Not a validator for the XML itself - it is the same class of check as
@@ -261,6 +294,46 @@ class helper_plugin_drawio extends DokuWiki_Plugin
         if (!preg_match('/\scontent\s*=\s*(["\'])(.*?)\1/is', $root[0], $m)) return '';
         $xml = html_entity_decode($m[2], ENT_QUOTES | ENT_XML1, 'UTF-8');
         return $this->isDiagramXml($xml) ? $xml : '';
+    }
+
+    /**
+     * The ids of pages whose relation_media metadata lists $media_id -
+     * straight from DokuWiki's own metadata index, not a live scan of every
+     * page's syntax. That matters for a caller deciding what to reindex: this
+     * only ever knows what the index itself already knows, so a page that has
+     * never been indexed at all (brand new, or indexing has genuinely never
+     * run for it) will not appear here - but that is also a page with nothing
+     * stale to fix, since core indexes a page's own content, including which
+     * media it embeds, the moment it is first saved. The gap this closes is
+     * the other one: a page that *was* indexed, correctly recording that it
+     * embeds this media id, before the diagram had a source to extract text
+     * from at all.
+     *
+     * dokuwiki\Search\MetadataSearch::mediause() is the current API for this.
+     * ft_mediause() is its deprecated wrapper on stable/master - but oldstable
+     * (2025-05-14b "Librarian") predates the MetadataSearch class entirely and
+     * only ever had the (not deprecated there) function ft_mediause(), so
+     * calling the class unconditionally would break there. Verified directly
+     * against .cache/dokuwiki-{stable,master,oldstable}: ft_mediause() exists,
+     * with the identical ($id, $ignore_perms=false) signature, in all three;
+     * MetadataSearch only exists on stable/master. Picking at runtime keeps
+     * this plugin working on all three without a hard dependency on either.
+     *
+     * $ignore_perms is always true here: the question this answers is "which
+     * pages need reindexing", not "which pages may the caller read" - the ACL
+     * that actually matters for what ends up in a page's index is the
+     * diagram's own namespace, already checked by action.php's
+     * _index_diagrams() before any diagram text is added to anything.
+     *
+     * @param string $media_id
+     * @return string[] page ids
+     */
+    public function pagesUsing($media_id)
+    {
+        if (class_exists('dokuwiki\\Search\\MetadataSearch')) {
+            return (new \dokuwiki\Search\MetadataSearch())->mediause($media_id, true);
+        }
+        return ft_mediause($media_id, true);
     }
 
     /**

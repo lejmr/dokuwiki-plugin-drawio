@@ -65,6 +65,36 @@ function edit(image)
 {
     // check auth
     var imgPointer = image;
+    var mediaId = imgPointer.getAttribute('id');
+
+    // A click on the diagram's *source* (ns:plan.drawio) rather than one of
+    // its renderings - the media manager button offers both now (see
+    // drawioAddMediaManagerButton()). Every action below this point
+    // (get_auth included) is keyed to a png/svg id - script.js never sends
+    // a .drawio one anywhere else - so this has to resolve to the rendering
+    // it belongs to before anything else runs. 'resolve_source' does that
+    // resolution AND the same auth check 'get_auth' does, in one request
+    // (see action.php's own comment on it for why a second, plain get_auth
+    // round trip after resolving is not needed), so the .drawio path costs
+    // exactly the same one request as the normal open does.
+    if (mediaId && mediaId.split('.').pop().toLowerCase() === 'drawio') {
+        drawioPost('resolve_source', mediaId, null, function (data) {
+            if (!data || data.granted !== true || !data.id) return;
+            // A stub, never attached to the page: edit_cb()/the 'export'
+            // handler below only ever call getAttribute('id') on it and, on
+            // save, setAttribute('src', ...) to refresh a live preview -
+            // there is no <img> for a .drawio in the media manager panel to
+            // refresh in the first place (core never renders one; .drawio
+            // has no registered mimetype - verified against the real panel
+            // markup), so a detached element is exactly as capable as a real
+            // one here and updating it is simply a no-op.
+            var stub = document.createElement('img');
+            stub.setAttribute('id', data.id);
+            edit_cb(stub);
+        }, true);
+        return;
+    }
+
     // get_auth now sends a JSON content type, like every other endpoint here,
     // so `data` is the real boolean jQuery parsed it into - compare it as
     // one, not against the string 'true' the old text/html response forced.
@@ -74,7 +104,7 @@ function edit(image)
     // network hiccup) is the more likely of the two - showing a generic
     // "the request failed" alert for the *unlikely* case while staying
     // silent for the likely one had it backwards.
-    drawioPost('get_auth', imgPointer.getAttribute('id'), null, function (data) {
+    drawioPost('get_auth', mediaId, null, function (data) {
         if (data !== true) return;
         edit_cb(imgPointer);
     }, true);
@@ -523,17 +553,40 @@ function drawioAddMediaManagerButton() {
     if (!mediaId) return;
 
     var ext = mediaId.split('.').pop();
-    if (conf['toolbar_possible_extension'].indexOf(ext) === -1) return;
+    // The source itself - ns:plan.drawio, the more important half of the
+    // pair (see edit()'s 'resolve_source' branch, which is what actually
+    // opens it) - is not one of the renderings 'toolbar_possible_extension'
+    // lists (that setting only decides which *new* diagram types the
+    // toolbar picker offers; it has never gated which existing renderings
+    // this button opens, and now it doesn't gate the source either).
+    var isSource = ext.toLowerCase() === 'drawio';
+    if (!isSource && conf['toolbar_possible_extension'].indexOf(ext) === -1) return;
 
+    // core's file detail panel only ever renders a <div class="image"><img>
+    // for a mimetype it recognises as an image (inc/media.php's
+    // tpl_mediaFileDetails()) - .drawio has no registered mimetype, so for
+    // it there is no <img> in the panel at all (verified against the real
+    // media manager markup: a plain <div class="panelHeader"> and nothing
+    // else where a rendering's <div class="image"> would be). A detached
+    // element carries the id exactly as well for edit()'s purposes - see
+    // its own comment on why that is a genuine no-op here, not a shortcut.
     var $img = jQuery('div.file div.image img').first();
-    if (!$img.length) return;
-    $img.attr('id', mediaId);
+    var target;
+    if ($img.length) {
+        $img.attr('id', mediaId);
+        target = $img[0];
+    } else if (isSource) {
+        target = document.createElement('img');
+        target.setAttribute('id', mediaId);
+    } else {
+        return;
+    }
 
     var $li = jQuery('<li class="drawio__mmbtn"></li>');
     var $link = jQuery('<a href="#"></a>').text(conf['editbutton']);
     $link.on('click', function (e) {
         e.preventDefault();
-        edit($img[0]);
+        edit(target);
     });
     $li.append($link);
     jQuery('div.file ul.actions').append($li);

@@ -189,10 +189,24 @@ class admin_plugin_drawio extends AdminPlugin
             );
 
             $rows = [];
+            $convertedIds = [];
             foreach ($window as $id) {
-                $rows[] = $this->_process($id, $diagrams[$id], $this->converting);
+                $row = $this->_process($id, $diagrams[$id], $this->converting);
+                $rows[] = $row;
+                if ($row['status'] === 'converted') $convertedIds[] = $id;
             }
             $this->_renderTable($rows);
+
+            // Same reindexing problem action.php's save path has, and the
+            // same fix, applied to this task's own writes - a bulk
+            // conversion that gives hundreds of diagrams a source but never
+            // makes any of their words searchable would be the identical
+            // bug wearing a different hat. See _reindexConverted()'s own
+            // docblock for why this runs once per batch rather than once
+            // per diagram.
+            if ($convertedIds) {
+                $this->_reindexConverted($convertedIds);
+            }
         }
 
         $this->_renderForm($this->offset, $nextOffset, $hasMore);
@@ -310,6 +324,70 @@ class admin_plugin_drawio extends AdminPlugin
         Event::createAndTrigger('MEDIA_UPLOAD_FINISH', $data, null, false);
 
         return ['id' => $id, 'status' => 'converted'];
+    }
+
+    /**
+     * Reindex, once each, every page that embeds any diagram this batch
+     * just gave a source to - see action.php's _reindex_diagram_pages() for
+     * the same mechanism on the save path; this is its bulk-conversion
+     * counterpart, so the same defect (a diagram getting a source that
+     * nothing ever makes searchable) does not survive in this task just
+     * because it writes sources a different way.
+     *
+     * Once per batch, not once per diagram or once per whole run: this
+     * task's entire job is converting up to $batchSize diagrams in one
+     * request, and diagrams sharing the same handful of embedding pages is
+     * the common case, not the exception - reindexing per diagram would
+     * reindex the same page over and over within a single batch for no
+     * benefit. Collecting every affected page id across the batch and
+     * reindexing the unique set once, after all of the batch's writes are
+     * done, does the identical job for a fraction of the work. Not once per
+     * *run* either (i.e. not deferred past this batch to some final step):
+     * there is no final step - an admin may stop clicking "convert" after
+     * any batch, and every batch that ran a write must leave the index
+     * caught up with what it wrote, the same way it must leave nothing else
+     * half done.
+     *
+     * No cap on how many pages this reindexes, unlike action.php's
+     * $reindexPageCap: that cap exists because a normal user's save request
+     * has to return promptly. This is the opposite shape - an admin-
+     * triggered, already-batched task ($batchSize diagrams per request,
+     * see its own docblock) where a slow batch is an accepted, visible cost
+     * the operator chose by clicking "convert", not a surprise sprung on an
+     * ordinary save. The per-row set_time_limit(30) reset _renderTable()
+     * already does for parsing diagram bytes is extended here, per page,
+     * for the same PHP-timeout reason.
+     *
+     * Each page's reindex is wrapped in its own try/catch, same reasoning
+     * as action.php: one broken page must not stop the rest, and must
+     * never turn a batch of successful conversions (already written to
+     * disk by this point) into a fatal error on the admin's screen.
+     *
+     * @param string[] $convertedIds media ids converted in this batch
+     */
+    private function _reindexConverted(array $convertedIds)
+    {
+        $pages = [];
+        foreach ($convertedIds as $id) {
+            $ids = [$id];
+            $other = $this->helper->otherRenderingID($id);
+            if ($other !== '') $ids[] = $other;
+            foreach ($ids as $mid) {
+                foreach ($this->helper->pagesUsing($mid) as $page) {
+                    $pages[$page] = true;
+                }
+            }
+        }
+
+        foreach (array_keys($pages) as $page) {
+            @set_time_limit(30);
+            try {
+                idx_addPage($page, false, true);
+            } catch (\Throwable $e) {
+                // one page's reindex failing must not stop the rest, or
+                // turn a successful batch of conversions into a fatal error
+            }
+        }
     }
 
     private function _renderTable(array $rows)
