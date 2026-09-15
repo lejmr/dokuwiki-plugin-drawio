@@ -233,6 +233,83 @@ class action_plugin_drawio_validation_save_test extends DokuWikiTest
     }
 
     /**
+     * A faithful shape of what draw.io's own SVG export contains for a
+     * diagram with Extras > Mathematical Typesetting enabled (issue #49).
+     * Verified against MathJax's SVG output docs (docs.mathjax.org/en/latest/
+     * options/output/svg.html) and drawio's export.js (Editor.prototype.
+     * addMathCss, graph.mathEnabled): a math label is typeset by MathJax
+     * inside the label's <foreignObject>, and MathJax's default SVG output
+     * (fontCache: 'local') renders each formula as its own <defs>/<use> pair
+     * so repeated glyphs share one <path> - the <use> always references a
+     * fragment ("#...") inside that same inner <svg>, never anything outside
+     * the document. This is not a <script> tag: draw.io never embeds one in
+     * the exported file (MathJax itself is only loaded into the *editor's*
+     * own page, to do the typesetting, before export).
+     */
+    protected function mathSvgBytes()
+    {
+        return $this->svgBytes(
+            '<g><foreignObject width="40" height="20">'
+            . '<div xmlns="http://www.w3.org/1999/xhtml">'
+            . '<mjx-container class="MathJax" jax="SVG">'
+            . '<svg xmlns="http://www.w3.org/2000/svg" width="2ex" height="1.5ex" viewBox="0 -750 900 750">'
+            . '<defs><path id="MJX-1-TEX-N-78" d="M52 289Q59 331 106 386T222 442Q257 442 286 424T329 379"/></defs>'
+            . '<g><use xlink:href="#MJX-1-TEX-N-78" x="0" y="0"/></g>'
+            . '</svg></mjx-container></div></foreignObject></g>'
+        );
+    }
+
+    /**
+     * The fix for issue #49: a math export must not be rejected just because
+     * MathJax's SVG output reuses glyphs through a local <defs>/<use> pair.
+     */
+    public function testSaveAcceptsARealMathTypesettingSvg()
+    {
+        $mediaId = 'test:math.svg';
+        $svg = $this->mathSvgBytes();
+        $this->saveViaAjax($mediaId, $svg);
+        $this->assertSame($svg, file_get_contents(mediaFN($mediaId)),
+            'a draw.io export with Mathematical Typesetting enabled must be saved, not rejected as if it were an attack');
+    }
+
+    /**
+     * The narrowed <use> check still has to catch what it always caught: a
+     * <use> is only ever safe when it stays inside the document it lives in.
+     * A <use> reaching outside it - an external SVG, a data: URI, a
+     * javascript: URL - is exactly as rejected as before this fix.
+     */
+    public function testSaveStillRejectsAUseElementPointingOutsideTheDocument()
+    {
+        $mediaId = 'test:evil-use.svg';
+        $svg = $this->svgBytes('<use xlink:href="https://evil.example/x.svg#payload"/>');
+        $this->saveViaAjax($mediaId, $svg);
+        $this->assertFileDoesNotExist(mediaFN($mediaId),
+            'a <use> pointing outside the document must still be rejected');
+    }
+
+    /**
+     * A <use> with two href attributes: the first a harmless fragment, the
+     * second external. SVG2 prefers href over xlink:href, so checking only
+     * the first href found would let this through. Every href must be a
+     * fragment - and a quoted value containing '>' must not end the tag
+     * early for the check.
+     */
+    public function testSaveRejectsAUseElementWhoseSecondHrefPointsOutside()
+    {
+        foreach ([
+            'test:evil-use2.svg' => '<use xlink:href="#ok" href="https://evil.example/x.svg#p"/>',
+            'test:evil-use3.svg' => '<use xlink:href="#a>" href="https://evil.example/x.svg#p"/>',
+            'test:evil-use4.svg' => '<use href=https://evil.example/x.svg#p />',
+        ] as $mediaId => $tag) {
+            $this->saveViaAjax($mediaId, $this->svgBytes($tag));
+            $this->assertFileDoesNotExist(mediaFN($mediaId), $tag);
+        }
+        // and the harmless shapes still pass
+        $this->saveViaAjax('test:ok-use.svg', $this->svgBytes('<defs><path id="g1" d="M0 0h1"/></defs><use href="#g1" xlink:href=\'#g1\'/>'));
+        $this->assertFileExists(mediaFN('test:ok-use.svg'));
+    }
+
+    /**
      * io_makeFileDir() used to run before the action was matched, so any
      * request - including one naming an action that does not exist -
      * created a namespace directory on disk as a side effect. Nothing needs

@@ -5,10 +5,120 @@
 // Run with: node _test/extra/script.test.js
 
 const {
+    fs, vm, path,
     assert, makeImage, buildSandbox, buildMediaPanelDom, loadScript, autosave,
     REALISTIC_CONF, noopJQuery, assertEnvironmentSurvives, withToolbar,
     querySelectorAll,
 } = require('../script-sandbox.inc.js');
+
+const SCRIPT_JS = path.join(__dirname, '..', '..', 'script.js');
+const SCRIPT_JS_SOURCE = fs.readFileSync(SCRIPT_JS, 'utf8');
+
+// --- issue #37 (Snippets plugin conflict): script.js must not throw when
+// JSINFO itself is missing, or shaped like a page addjsinfo() never ran
+// against --------------------------------------------------------------
+//
+// splitbrain's diagnosis of #37: the plugin's JS assumed values in JSINFO
+// that action.php's addjsinfo() only ever sets on DOKUWIKI_STARTED/
+// MEDIAMANAGER_STARTED - the Snippets plugin's popup fires neither, so it
+// can present a page where JSINFO was never declared at all (not merely
+// missing plugin_drawio - genuinely absent, because whatever built that
+// popup's <head> never called core's own jsinfo()/tpl_metaheaders() either).
+// That is a stricter case than #16's fix (JSINFO present, JSINFO.id null):
+// a *bare* `JSINFO` reference (not `typeof JSINFO`) on an undeclared global
+// is a ReferenceError, not a friendly `undefined` - and DokuWiki
+// concatenates every plugin's script.js into one response (js_pluginscripts()
+// in lib/exe/js.php), so that throw kills every plugin script after ours in
+// the bundle, exactly like #16 did.
+//
+// buildSandbox()/assertEnvironmentSurvives() (script-sandbox.inc.js) always
+// give the vm context a `JSINFO` property, even when its value is undefined -
+// which is not the same thing: a property that exists (however its value)
+// never triggers a ReferenceError on a bare reference, only a truly absent
+// global does. So this case is built by hand, with no JSINFO key at all.
+function runWithoutJsinfoGlobal(name, extra) {
+    const sandbox = Object.assign({ window: {}, document: {}, console }, extra);
+    // sanity: this sandbox really has no JSINFO global, matching the popup
+    assert.ok(!Object.prototype.hasOwnProperty.call(sandbox, 'JSINFO'),
+        'test bug: sandbox must not declare JSINFO at all for this case');
+    sandbox.global = sandbox;
+    vm.createContext(sandbox);
+    let threw = null;
+    try {
+        vm.runInContext(SCRIPT_JS_SOURCE, sandbox);
+        vm.runInContext('window.markerFromNextPlugin = true;', sandbox);
+    } catch (e) {
+        threw = e;
+    }
+    assert.strictEqual(threw, null,
+        'script.js must not throw on ' + name + ': ' + (threw && threw.stack));
+    assert.strictEqual(sandbox.window.markerFromNextPlugin, true,
+        'a plugin script concatenated after script.js must still run on ' + name);
+    return sandbox;
+}
+
+// (a) no JSINFO global at all, on a page whose edit toolbar *is* present -
+// the exact combination that reaches script.js's toolbar-registration guard
+// (`typeof window.toolbar !== 'undefined' && ...`) and, before this fix,
+// went on to read a bare `JSINFO` straight into a ReferenceError.
+{
+    const sharedToolbar = [];
+    const env = runWithoutJsinfoGlobal(
+        'a page with no JSINFO global at all and window.toolbar defined (the Snippets-popup shape)',
+        { jQuery: noopJQuery(), toolbar: sharedToolbar, window: { toolbar: sharedToolbar } },
+    );
+    assert.strictEqual(env.toolbar.length, 0,
+        'with no JSINFO there is no page id to build {{drawio>...}} against - no toolbar item should be registered');
+}
+
+// also drive the module-level jQuery(document ready) registration path
+// (drawioAddMediaManagerButton()) in the same no-JSINFO environment -
+// buildSandbox() builds a full fake DOM/jQuery already; just strip JSINFO
+// from it entirely to close the gap between "JSINFO missing a key" (already
+// covered above) and "JSINFO absent".
+{
+    const built = buildSandbox();
+    delete built.sandbox.JSINFO;
+    let threw = null;
+    try {
+        loadScript(built.sandbox);
+    } catch (e) {
+        threw = e;
+    }
+    assert.strictEqual(threw, null,
+        'script.js must not throw at load with no JSINFO at all, jQuery present: ' + (threw && threw.stack));
+}
+
+console.log('OK: script.js survives having no JSINFO global at all (issue #37)');
+
+// (b) JSINFO declared but plugin_drawio entirely missing, window.toolbar
+// defined and JSINFO.id a normal string - drawioConf() must return null
+// (not throw) and the toolbar registration must still work off JSINFO.id
+// alone, independently of plugin_drawio.
+{
+    const sharedToolbar = [];
+    const env = assertEnvironmentSurvives(
+        'JSINFO without plugin_drawio, toolbar defined, JSINFO.id a string',
+        { id: 'test:page', namespace: '', ACT: 'show' },
+        { jQuery: noopJQuery(), toolbar: sharedToolbar, window: { toolbar: sharedToolbar } },
+    );
+    assert.strictEqual(env.toolbar.length, 0,
+        'with no plugin_drawio config, drawioConf() is null and edit_cb() bails - but the toolbar block itself ' +
+        'must not throw just because plugin_drawio is missing (toolbarPossibleExtension falls back to [])');
+}
+
+// (c) JSINFO.id undefined (not null, not a string) - a shape neither the
+// golden matrix's null case nor the extra tier's '' case above covers, but
+// `typeof JSINFO.id === 'string'` treats it identically: false, no throw.
+{
+    assertEnvironmentSurvives(
+        'JSINFO.id undefined, plugin_drawio present, toolbar defined',
+        { plugin_drawio: REALISTIC_CONF }, // no `id` key at all -> JSINFO.id is undefined
+        { jQuery: noopJQuery(), toolbar: [], window: { toolbar: [] } },
+    );
+}
+
+console.log('OK: script.js survives JSINFO without plugin_drawio, and JSINFO.id undefined (issue #37 matrix)');
 
 // --- hostile-environment variant beyond the golden matrix: JSINFO.id === ''
 //
