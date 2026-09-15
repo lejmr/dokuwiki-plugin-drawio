@@ -103,6 +103,14 @@
                 // configured, rather than a fixed guess that would be wrong
                 // for any site that changed it from the 900s/15min default.
                 'locktime' => (int) $conf['locktime'],
+                // issue #30: script.js loads this script itself, once, only
+                // on a page that actually has an interactive diagram - see
+                // its drawioInitInteractive(). Published unconditionally
+                // (like 'url' above) rather than only when the 'interactive'
+                // config is on, since a diagram can ask for the viewer with
+                // ?interactive on its own even while the site-wide default
+                // stays off.
+                'viewer_url' => $this->getConf('viewer_url'),
                 // CSRF token for the ajax calls below. Core publishes the very
                 // same value in every page's HTML itself - see tpl_metaheaders()
                 // (JSINFO is printed inline) and formSecurityToken(), which puts

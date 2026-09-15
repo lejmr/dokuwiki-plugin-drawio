@@ -25,7 +25,10 @@ through an embedded draw.io editor. That means:
 - **The editor is a third party.** By default the plugin loads the editor from
   `embed.diagrams.net` in an iframe; the diagram is sent to it and comes back
   from it. Wikis that cannot accept that should point the `url` setting at a
-  self-hosted draw.io.
+  self-hosted draw.io. The interactive viewer (`?interactive`, or the
+  `interactive` config default) is the same trade-off: it loads a script from
+  `viewer.diagrams.net` by default, admin-configurable via `viewer_url` the
+  same way, and only ever fetched on a page that actually renders one.
 - **Diagram content is user content.** A diagram is an image file whose bytes
   come from whoever edited it, so it is treated as untrusted on the way in and
   on the way out.

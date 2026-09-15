@@ -16,7 +16,7 @@ cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 fail=0
 listing=$(git archive HEAD | tar -t)
 
-for path in docker _test bin .github CLAUDE.md; do
+for path in docker _test bin .github .claude; do
     if echo "$listing" | grep -qE "^$path(/|\$)"; then
         echo "FAIL '$path' is present in \`git archive HEAD\` - export-ignore in .gitattributes is missing or broken"
         fail=1

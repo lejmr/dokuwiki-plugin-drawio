@@ -445,6 +445,8 @@ function edit_cb(image)
                 if (pendingXml) payload.xml = pendingXml;
                 drawioPost('save', imagePointer.getAttribute('id'), payload, null, true)
                 .done(function() {
+                    drawioRefreshDiagramElement(imagePointer);
+
                     drawioLocalStorageRemove('.draft-' + currentDiagramId);
                     draft = null;
 
@@ -682,11 +684,191 @@ function drawioAddMediaManagerButton() {
     jQuery('div.file ul.actions').append($li);
 }
 
+// issue #30: draw.io's own viewer script for {{drawio>...?interactive}} (or
+// the 'interactive' config default) - syntax.php renders a
+// '.mxgraph.drawio-interactive' div for it to pick up (its own
+// GraphViewer.processElements(), run on the script's 'load' event scans the
+// whole document itself; nothing here has to drive that part). Loaded at
+// most once per page, and only when the page actually has one - no
+// third-party request for a wiki that never uses the feature (issue #42).
+var viewerScriptInjected = false;
+
+// Batch 4 row 3: after a successful save the rendering on the page must
+// update without a reload. The static <img> case already does that on its
+// own (the 'export' handler above sets image.src to the data the editor
+// just exported) - only the GraphViewer container is left stale, since it
+// was never told a save happened: its 'data-mxgraph' url still points at
+// the same fetch.php URL it loaded on page view, and nothing tells
+// GraphViewer (or the browser's own HTTP cache in front of that URL) to
+// look again. Called from the save 'export' handler's .done() with
+// whatever element edit_cb() was invoked on - a no-op for the static <img>
+// case (no 'drawio-interactive' class there), so one call covers both save
+// paths without a branch at the call site.
+function drawioRefreshDiagramElement(element) {
+    if (!element || !element.classList || typeof element.classList.contains !== 'function') return;
+    if (!element.classList.contains('drawio-interactive')) return;
+    var cfg;
+    try {
+        cfg = JSON.parse(element.getAttribute('data-mxgraph') || '{}');
+    } catch (e) {
+        return;
+    }
+    if (!cfg || !cfg.url) return;
+
+    // Cache-bust with a plain, unrecognised query param: fetch.php's own
+    // $INPUT reads only 'media'/'cache'/'w'/'h'/'fit'/'rev'/'tok' (verified
+    // against .cache/dokuwiki-stable's lib/exe/fetch.php) and
+    // checkFileStatus()'s tok/ACL check keys purely on 'media'
+    // (inc/fetch.functions.php) - an extra 't' param is never read by
+    // either, so it can't break access, only defeat a cached response for
+    // the XHR GraphViewer is about to make.
+    cfg.url = /[?&]t=\d+/.test(cfg.url)
+        ? cfg.url.replace(/([?&]t=)\d+/, '$1' + Date.now())
+        : cfg.url + (cfg.url.indexOf('?') === -1 ? '?' : '&') + 't=' + Date.now();
+    element.setAttribute('data-mxgraph', JSON.stringify(cfg));
+
+    // Clear the previous render - the viewer's own DOM, never anything
+    // fetched from elsewhere, so plain node removal is correct here (never
+    // innerHTML, see the 'export'/svg handling above for why).
+    while (element.firstChild) {
+        element.removeChild(element.firstChild);
+    }
+
+    // drawioInitInteractive() above may have pulled 'mxgraph' off this
+    // container if it had no .drawio source yet (issue #30) - the save
+    // that just happened means one exists now, so restore it before asking
+    // the viewer to look again. createViewerForElement() itself doesn't
+    // require the class (it reads data-mxgraph directly), but leaving it
+    // off would desync this container from any later
+    // GraphViewer.processElements() scan of the page.
+    if (typeof element.classList.add === 'function') {
+        element.classList.add('mxgraph');
+    }
+
+    if (window.GraphViewer && typeof window.GraphViewer.createViewerForElement === 'function') {
+        window.GraphViewer.createViewerForElement(element);
+    }
+}
+
+function drawioInitInteractive() {
+    // document.querySelectorAll is unconditionally available in every real
+    // browser; guarded anyway (typeof, not a bare call) so a test sandbox
+    // that doesn't stub it exercises exactly nothing here, the same
+    // tolerance every other DOM access in this file already has (see #16).
+    if (typeof document.querySelectorAll !== 'function') return;
+    var containers = document.querySelectorAll('.drawio-interactive');
+    if (!containers.length) return;
+
+    // issue #30 (a missing .drawio source): GraphViewer's own
+    // processElements() (run synchronously the moment its script finishes
+    // loading - not on any later 'load'/idle event) inserts its (empty) SVG
+    // canvas into a container as soon as it starts working on it, well
+    // before it has fetched and parsed that container's XML - so "the
+    // container gained a child" is not proof a diagram actually rendered,
+    // only that GraphViewer attempted it. A 404 (or any body it can't parse
+    // as a diagram) makes it throw ("Not a diagram file", uncaught) instead
+    // of ever putting real content in - but the empty canvas it already
+    // inserted is still there, which used to both hide the fallback image
+    // and leave an uncaught console error.
+    //
+    // Checked here first instead, with a plain HEAD against the very same
+    // fetch.php URL the viewer's own XHR would use (so the ACL/existence
+    // decision stays exactly where it always lived - fetch.php, per
+    // visitor - nothing here special-cases anything), and only handed to
+    // GraphViewer at all (by leaving its 'mxgraph' class in place) once
+    // that comes back ok. A container that fails the check has 'mxgraph'
+    // removed before the viewer script is even requested, so
+    // GraphViewer.processElements() (document.getElementsByClassName
+    // ('mxgraph'), read live when it runs) never finds it, never throws for
+    // it, and the fallback - never explicitly hidden for it - simply stays
+    // visible, the same as it would for any other JS disabled/unavailable.
+    //
+    // fetch() is unconditionally available in every real browser new enough
+    // to run GraphViewer's own bundle in the first place; guarded (typeof)
+    // anyway for the same reason as every other browser API in this file -
+    // a test sandbox, or a browser too old for either, simply skips the
+    // check and behaves exactly as before this fix (GraphViewer decides).
+    var checks = [];
+    if (typeof fetch === 'function') {
+        Array.prototype.forEach.call(containers, function (container) {
+            if (typeof container.getAttribute !== 'function' || !container.classList) return;
+            var cfg;
+            try {
+                cfg = JSON.parse(container.getAttribute('data-mxgraph') || '{}');
+            } catch (e) {
+                return;
+            }
+            if (!cfg || !cfg.url) return;
+            checks.push(
+                fetch(cfg.url, { method: 'HEAD', credentials: 'same-origin' }).then(function (r) {
+                    if (!r.ok) container.classList.remove('mxgraph');
+                }, function () {
+                    container.classList.remove('mxgraph');
+                })
+            );
+        });
+    }
+
+    function proceed() {
+        if (!viewerScriptInjected) {
+            viewerScriptInjected = true;
+            var conf = drawioConf();
+            var url = (conf && conf['viewer_url']) || 'https://viewer.diagrams.net/js/viewer-static.min.js';
+            var script = document.createElement('script');
+            script.setAttribute('src', url);
+            document.body.appendChild(script);
+        }
+
+        // syntax.php renders a fallback <img> (same fetch.php image URL/
+        // onerror placeholder as a static diagram) as a sibling of each
+        // container - a missing .drawio source (caught above) or a
+        // blocked/failed viewer script (#42) both leave the container
+        // empty, which is exactly when that fallback must stay visible.
+        // Hide it only once the viewer has actually rendered something
+        // into its container; never on a timer, so a failed/blocked viewer
+        // keeps showing the fallback instead of an empty box.
+        // MutationObserver is unconditionally available in every real
+        // browser too - same tolerance as above for a sandbox that doesn't
+        // stub it.
+        if (typeof MutationObserver !== 'function') return;
+        Array.prototype.forEach.call(containers, function (container) {
+            var fallback = container.nextElementSibling;
+            if (!fallback || !fallback.classList || !fallback.classList.contains('drawio-interactive-fallback')) {
+                return;
+            }
+            if (container.children.length) {
+                fallback.hidden = true;
+                return;
+            }
+            var observer = new MutationObserver(function () {
+                if (container.children.length) {
+                    fallback.hidden = true;
+                    observer.disconnect();
+                }
+            });
+            observer.observe(container, { childList: true });
+        });
+    }
+
+    // The viewer script (and the scan it does the moment it finishes
+    // loading) must not be requested until every existence check above has
+    // settled - otherwise a slow HEAD racing a fast (cached) script load
+    // could let GraphViewer reach a container before its class was pulled.
+    // A same-origin HEAD is negligible next to downloading and parsing the
+    // third-party viewer bundle either way.
+    if (checks.length && typeof Promise !== 'undefined' && Promise.all) {
+        Promise.all(checks).then(proceed, proceed);
+    } else {
+        proceed();
+    }
+}
+
 // guarded: the test sandboxes in _test/script.test.js don't stub a real
 // jQuery, and script.js must still load harmlessly there (see #16 above)
 if (typeof jQuery === 'function') {
     jQuery(function () {
         drawioAddMediaManagerButton();
         jQuery(document).ajaxComplete(drawioAddMediaManagerButton);
+        drawioInitInteractive();
     });
 }

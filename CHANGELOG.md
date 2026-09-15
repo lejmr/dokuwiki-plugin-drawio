@@ -5,6 +5,20 @@ written for someone running the plugin, not for someone patching its code —
 see the pull requests linked from each release on GitHub for the technical
 detail.
 
+## [Unreleased]
+
+### Added
+
+- Interactive diagrams (#30): `{{drawio>plan?interactive}}` renders the
+  diagram with draw.io's viewer instead of a static image - links inside
+  the diagram are clickable, with zoom, layers and a lightbox. The
+  `interactive` setting makes it the default for every diagram (`?static`
+  opts one out); `viewer_url` points a self-hosted draw.io's viewer. The
+  viewer loads the diagram's stored source, so a diagram that has none yet
+  (see **Upgrading** below) falls back to its image; the page never carries
+  the diagram XML itself. An "Edit with draw.io" button always sits under
+  an interactive diagram, and a saved change shows up without a reload.
+
 ## [2026-09-15]
 
 The first release to come out of an actual release process. It carries a

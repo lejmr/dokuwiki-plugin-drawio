@@ -12,4 +12,11 @@ $conf['ui']        = 'atlas';
 $conf['edit_button'] = 0;
 // issue #50: 0 keeps the iframe covering the whole viewport, as before
 $conf['top_offset'] = 0;
+// issue #30: off by default - {{drawio>...}} keeps rendering a plain <img>
+// unless a diagram asks for ?interactive, or this is switched on.
+$conf['interactive'] = 0;
+// issue #30: draw.io's own hosted viewer script. A self-hosted draw.io
+// serves the identical file at <host>/js/viewer-static.min.js - point this
+// there instead to avoid the third-party request entirely (see also #42).
+$conf['viewer_url'] = 'https://viewer.diagrams.net/js/viewer-static.min.js';
 

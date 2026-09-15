@@ -428,4 +428,73 @@ class syntax_plugin_drawio_validation_render_test extends DokuWikiTest
         $this->assertStringContainsString('rev='.$oldMtime, $html);
         $this->assertStringContainsString('w=200', $html);
     }
+
+    /**
+     * issue #30: same rule as testAclDoesNotChangeTheRenderedHtmlAtAll()
+     * above, applied to the interactive markup - no server-side existence/
+     * ACL decision is baked into the page for the viewer's own url either,
+     * exactly like the static <img> path never has one.
+     */
+    public function testInteractiveHtmlIsIdenticalRegardlessOfViewer()
+    {
+        $this->createMedia('restricted:present.png');
+        $this->createMedia('restricted:present.drawio', 'not-really-xml');
+
+        $this->enableAcl(
+            ['*             @ALL   8', 'restricted:*  @ALL   0', 'restricted:*  @boss  8'],
+            'admin',
+            ['boss']
+        );
+        $allowed = $this->render('{{drawio>restricted:present?interactive}}');
+
+        $this->enableAcl(
+            ['*             @ALL   8', 'restricted:*  @ALL   0'],
+            'john',
+            ['user']
+        );
+        $denied = $this->render('{{drawio>restricted:present?interactive}}');
+
+        $this->assertSame($allowed, $denied);
+        $this->assertStringContainsString('fetch.php?media=restricted:present.drawio', $denied);
+    }
+
+    /**
+     * issue #30: the interactive markup never carries the diagram's XML
+     * itself - only a fetch.php url the viewer fetches client-side. Guards
+     * the "no server-side existence/ACL check" rule syntax.php's long
+     * comment describes: inlining the XML would require exactly the check
+     * that comment says never to add.
+     */
+    public function testInteractiveMarkupNeverInlinesTheXmlSource()
+    {
+        $xml = '<mxfile><diagram><mxGraphModel>SECRET-SHAPE-LABEL</mxGraphModel></diagram></mxfile>';
+        $this->createMedia('test:withsource.png');
+        $this->createMedia('test:withsource.drawio', $xml);
+
+        $html = $this->render('{{drawio>test:withsource?interactive}}');
+
+        $this->assertStringNotContainsString('SECRET-SHAPE-LABEL', $html);
+        $this->assertStringNotContainsString(htmlspecialchars($xml), $html);
+    }
+
+    /**
+     * issue #30: the raw '&' in a rev= query string must reach the page as
+     * '&amp;' exactly once - json_encode() first, hsc() over the whole
+     * attribute second. Encoding rev= as '&amp;rev=' (the html-attribute
+     * form used elsewhere in this file) before json_encode()+hsc() would
+     * double-escape it into '&amp;amp;rev='.
+     */
+    public function testInteractiveUrlAmpersandIsEscapedExactlyOnce()
+    {
+        $mediaId = 'test:revvedinteractive.png';
+        $oldMtime = time() - 120;
+        $this->archiveOldMediaRevision($mediaId, 'first-version', $oldMtime);
+        $this->createMedia($mediaId, 'second-version');
+        $this->createMedia('test:revvedinteractive.drawio', 'not-really-xml');
+
+        $html = $this->renderAtDate('{{drawio>test:revvedinteractive?interactive}}', time() - 60);
+
+        $this->assertStringContainsString('&amp;rev='.$oldMtime, $html);
+        $this->assertStringNotContainsString('&amp;amp;', $html);
+    }
 }
