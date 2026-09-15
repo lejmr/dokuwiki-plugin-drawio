@@ -221,4 +221,140 @@ class syntax_plugin_drawio_test extends DokuWikiTest
         $this->assertStringContainsString('blank-image.png', $html);
         $this->assertStringContainsString('onclick', $html);
     }
+
+    /**
+     * ODT export (issue #7) is provided by a third-party "odt" plugin
+     * (https://www.dokuwiki.org/plugin:odt) that most installs do not have.
+     * DokuWiki core (p_get_renderer()) simply returns no renderer for a mode
+     * nobody provides, so p_render('odt', ...) must come back null - not throw,
+     * not warn - proving the feature is a no-op, not a crash, when the odt
+     * plugin isn't installed. This is the one part of "odt support" that is
+     * honestly testable without actually having that plugin in the test image.
+     */
+    public function testOdtExportIsANoopWhenTheOdtPluginIsNotInstalled()
+    {
+        $this->createMedia('test:present.png');
+
+        global $ID, $INPUT;
+        $ID = 'start';
+        $_REQUEST['id'] = 'start';
+        $INPUT = new \dokuwiki\Input\Input();
+        $info = null;
+
+        $result = p_render('odt', p_get_instructions('{{drawio>test:present}}'), $info);
+
+        $this->assertNull($result);
+    }
+
+    /**
+     * Build the $data render() expects for a given drawio tag, exactly as
+     * DokuWiki's parser would via handle() - so these tests exercise the same
+     * parsing the xhtml tests above go through, just feeding the result into
+     * render('odt', ...) directly instead of p_render(), since p_render() can't
+     * reach an 'odt' renderer that isn't installed (see the noop test above).
+     */
+    protected function renderOdt($match, Doku_Renderer $renderer, $id = 'start')
+    {
+        global $ID, $INPUT;
+        $ID = $id;
+        $_REQUEST['id'] = $id;
+        $INPUT = new \dokuwiki\Input\Input();
+
+        /** @var syntax_plugin_drawio $plugin */
+        $plugin = plugin_load('syntax', 'drawio');
+        // same construction p_get_instructions() uses on releases that have
+        // ModeRegistry - a bare `new Doku_Handler()` triggers its own deprecation
+        // warning there. oldstable predates ModeRegistry entirely.
+        if (class_exists('\dokuwiki\Parsing\ModeRegistry')) {
+            global $conf;
+            $handler = new Doku_Handler(new \dokuwiki\Parsing\ModeRegistry($conf['syntax']));
+        } else {
+            $handler = new Doku_Handler();
+        }
+        $data = $plugin->handle($match, DOKU_LEXER_SPECIAL, 0, $handler);
+
+        return $plugin->render('odt', $renderer, $data);
+    }
+
+    public function testOdtModeEmbedsTheDiagramAsAnImage()
+    {
+        $this->createMedia('test:present.png', 'not-really-a-png');
+        $renderer = new drawio_test_fake_odt_renderer();
+
+        $ok = $this->renderOdt('{{drawio>test:present}}', $renderer);
+
+        $this->assertTrue($ok);
+        $this->assertCount(1, $renderer->addImageCalls);
+        $this->assertSame(mediaFN('test:present.png'), $renderer->addImageCalls[0]['src']);
+    }
+
+    public function testOdtModePassesSizeAndTitleToOdtAddImage()
+    {
+        $this->createMedia('test:present.png');
+        $renderer = new drawio_test_fake_odt_renderer();
+
+        $this->renderOdt('{{drawio>test:present?200x100|My Title}}', $renderer);
+
+        $call = $renderer->addImageCalls[0];
+        $this->assertSame('200', $call['width']);
+        $this->assertSame('100', $call['height']);
+        $this->assertSame('My Title', $call['title']);
+    }
+
+    public function testOdtModeSkipsAMissingDiagramInsteadOfExportingThePlaceholder()
+    {
+        $renderer = new drawio_test_fake_odt_renderer();
+
+        $ok = $this->renderOdt('{{drawio>test:missing}}', $renderer);
+
+        $this->assertTrue($ok, 'a missing diagram must not fail the export');
+        $this->assertCount(0, $renderer->addImageCalls);
+    }
+
+    public function testOdtModeSkipsAnEmptyZeroByteDiagram()
+    {
+        // issue #66, same rule as the xhtml placeholder fallback above
+        $this->createMedia('test:blank.png', '');
+        $renderer = new drawio_test_fake_odt_renderer();
+
+        $this->renderOdt('{{drawio>test:blank}}', $renderer);
+
+        $this->assertCount(0, $renderer->addImageCalls);
+    }
+
+    public function testOdtModeStillEmbedsALinkonlyDiagram()
+    {
+        // linkonly exists so a click opens the drawio editor in xhtml - there is
+        // no editor to open in a static export, so a linkonly diagram is
+        // embedded as an image here too rather than becoming a dead link.
+        $this->createMedia('test:present.png');
+        $renderer = new drawio_test_fake_odt_renderer();
+
+        $this->renderOdt('{{drawio>test:present?linkonly}}', $renderer);
+
+        $this->assertCount(1, $renderer->addImageCalls);
+    }
+}
+
+/**
+ * Stands in for the third-party odt plugin's renderer_plugin_odt_page, whose
+ * _odtAddImage($src, $width, $height, $align, $title, $style, $returnonly)
+ * takes $src as a filesystem path (mediaFN(), not a media id or URL) - see
+ * https://github.com/LarsGit223/dokuwiki-plugin-odt ODT/ODTImage.php. Records
+ * calls instead of building real ODT XML so these tests don't depend on that
+ * plugin being installed.
+ */
+class drawio_test_fake_odt_renderer extends Doku_Renderer
+{
+    public $addImageCalls = [];
+
+    public function getFormat()
+    {
+        return 'odt';
+    }
+
+    public function _odtAddImage($src, $width = null, $height = null, $align = null, $title = null, $style = null, $returnonly = false)
+    {
+        $this->addImageCalls[] = compact('src', 'width', 'height', 'align', 'title');
+    }
 }
