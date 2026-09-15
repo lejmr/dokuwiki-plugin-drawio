@@ -32,6 +32,35 @@ class syntax_plugin_drawio_test extends DokuWikiTest
         return p_render('xhtml', p_get_instructions($text), $info);
     }
 
+    /**
+     * Whether p_render() came back saying its output may be cached - the
+     * $renderer->info['cache'] flag nocache() clears, surfaced by p_render()
+     * through its by-reference $info argument.
+     */
+    protected function renderIsCacheable($text, $id = 'start')
+    {
+        global $ID, $INPUT;
+        $ID = $id;
+        $_REQUEST['id'] = $id;
+        $INPUT = new \dokuwiki\Input\Input();
+
+        p_render('xhtml', p_get_instructions($text), $info);
+
+        return (bool) $info['cache'];
+    }
+
+    /**
+     * Plugin config is $conf['plugin'][name][setting], and getConf() binds
+     * its own $this->conf to that array by reference on first load (see
+     * PluginTrait::loadConfig()) - so writing/reading it directly here
+     * affects the plugin instance whether or not it has already loaded.
+     */
+    protected function setConf($setting, $value)
+    {
+        global $conf;
+        $conf['plugin']['drawio'][$setting] = $value;
+    }
+
     protected function createMedia($mediaId, $content = 'not-really-a-png')
     {
         $file = mediaFN($mediaId);
@@ -40,10 +69,16 @@ class syntax_plugin_drawio_test extends DokuWikiTest
         return $file;
     }
 
-    public function testMissingDiagramRendersPlaceholder()
+    public function testMissingDiagramFallsBackToPlaceholderOnErrorInTheBrowser()
     {
+        // The plugin no longer checks existence before choosing what to
+        // render: the <img> always points at fetch.php (which will answer
+        // 404 for this one), and an onerror handler swaps it to the on-wiki
+        // placeholder client-side - see the comment in render() above.
         $html = $this->render('{{drawio>test:missing}}');
 
+        $this->assertStringContainsString('fetch.php?media=test:missing.png', $html);
+        $this->assertStringContainsString('onerror', $html);
         $this->assertStringContainsString('blank-image.png', $html);
         $this->assertStringContainsString("id='test:missing.png'", $html);
     }
@@ -54,8 +89,7 @@ class syntax_plugin_drawio_test extends DokuWikiTest
 
         $html = $this->render('{{drawio>test:present}}');
 
-        $this->assertStringContainsString('fetch.php?media=test:present.png', $html);
-        $this->assertStringNotContainsString('blank-image.png', $html);
+        $this->assertStringContainsString("src='".DOKU_BASE."lib/exe/fetch.php?media=test:present.png'", $html);
     }
 
     public function testExplicitExtensionIsNotDuplicated()
@@ -64,6 +98,33 @@ class syntax_plugin_drawio_test extends DokuWikiTest
 
         $this->assertStringContainsString("id='test:explicit.png'", $html);
         $this->assertStringNotContainsString('.png.png', $html);
+    }
+
+    /**
+     * Whether a name already carries an extension is decided against the
+     * fixed png/svg pair every other write/read path uses - not the admin's
+     * toolbar_possible_extension, which only names what the *toolbar* offers
+     * for a new diagram. Run at both the shipped default (png only) and at
+     * png,svg, since the point is that the answer does not depend on it.
+     */
+    public function testExplicitSvgExtensionIsNotDuplicatedAtShippedDefaultConfig()
+    {
+        $this->setConf('toolbar_possible_extension', 'png');
+
+        $html = $this->render('{{drawio>test:plan.svg}}');
+
+        $this->assertStringContainsString("id='test:plan.svg'", $html);
+        $this->assertStringNotContainsString('.svg.png', $html);
+    }
+
+    public function testExplicitSvgExtensionIsNotDuplicatedWithBothExtensionsConfigured()
+    {
+        $this->setConf('toolbar_possible_extension', 'png,svg');
+
+        $html = $this->render('{{drawio>test:plan.svg}}');
+
+        $this->assertStringContainsString("id='test:plan.svg'", $html);
+        $this->assertStringNotContainsString('.svg.png', $html);
     }
 
     public function testRelativeNameResolvesAgainstCurrentNamespace()
@@ -215,27 +276,48 @@ class syntax_plugin_drawio_test extends DokuWikiTest
         $this->assertArrayHasKey('wiki:some:tracked.png', $media);
     }
 
-    public function testEmptyMediaFileFallsBackToPlaceholder()
+    public function testEmptyMediaFileFallsBackToPlaceholderOnErrorInTheBrowser()
     {
-        // issue #66: an empty diagram was saved, leaving a zero-byte file
+        // issue #66: an empty diagram was saved, leaving a zero-byte file -
+        // fetch.php serves it (200, zero bytes), the browser can't decode
+        // that as an image, onerror fires the same as for a 404.
         $this->createMedia('test:blank.png', '');
 
         $html = $this->render('{{drawio>test:blank}}');
 
+        $this->assertStringContainsString('fetch.php?media=test:blank.png', $html);
+        $this->assertStringContainsString('onerror', $html);
         $this->assertStringContainsString('blank-image.png', $html);
         $this->assertStringContainsString('onclick', $html);
     }
 
     /**
-     * S5: media_exists() alone says nothing about permissions. A page editor
-     * who may not read a namespace must not be able to tell, from the
-     * rendered output, whether a file exists there or not - fetch.php itself
-     * returns an identical 403 for "denied" and "does not exist", so any
-     * difference here would be a disclosure invented by this plugin.
+     * S5 / the arbiter's cache-staleness finding: this plugin must never
+     * render different HTML for an allowed vs a denied viewer. Before, it
+     * checked mayReadMedia() itself and swapped in the placeholder for a
+     * denied viewer - correct per-render, but DokuWiki's page cache is
+     * shared, so caching one visitor's render and serving it to the next
+     * would leak the ACL-gated choice anyway (and did: an ACL tightened
+     * after a page was cached left the old, permissive HTML in place
+     * indefinitely). render() now never makes this decision at all - the
+     * <img> is the same fetch.php URL regardless of who's asking, and
+     * fetch.php enforces the ACL itself at request time - so there is no
+     * per-viewer difference left for a render, or a cache, to leak.
      */
-    public function testAclDeniedDiagramIsIndistinguishableFromMissing()
+    public function testAclDoesNotChangeTheRenderedHtmlAtAll()
     {
         $this->createMedia('restricted:present.png');
+
+        $this->enableAcl(
+            [
+                '*             @ALL   8',
+                'restricted:*  @ALL   0',
+                'restricted:*  @boss  8',
+            ],
+            'admin',
+            ['boss']
+        );
+        $allowed = $this->render('{{drawio>restricted:present}}');
 
         $this->enableAcl(
             [
@@ -245,11 +327,10 @@ class syntax_plugin_drawio_test extends DokuWikiTest
             'john',
             ['user']
         );
+        $denied = $this->render('{{drawio>restricted:present}}');
 
-        $html = $this->render('{{drawio>restricted:present}}');
-
-        $this->assertStringNotContainsString('fetch.php', $html);
-        $this->assertStringContainsString('blank-image.png', $html);
+        $this->assertSame($allowed, $denied);
+        $this->assertStringContainsString('fetch.php?media=restricted:present.png', $denied);
     }
 
     /**
@@ -363,6 +444,40 @@ class syntax_plugin_drawio_test extends DokuWikiTest
         $this->renderOdt('{{drawio>test:present?linkonly}}', $renderer);
 
         $this->assertCount(1, $renderer->addImageCalls);
+    }
+
+    /**
+     * nocache() is gone entirely (see render()'s xhtml comment): the <img>
+     * it emits is the same fetch.php URL for every diagram and every
+     * visitor, so there is nothing render-time-decided left that a shared
+     * page cache could serve stale - not "the diagram was just created"
+     * (the old missing-diagram gap this plugin used to force nocache() to
+     * cover), and not "an ACL was just tightened" (the arbiter's finding:
+     * a page cached while a namespace was public kept serving the real
+     * link after the namespace was restricted, because nothing told the
+     * cache the ACL had changed). Both are the same mechanism - a
+     * render-time decision baked into shared HTML - and both are closed by
+     * removing the decision, not by inventing another cache dependency for
+     * each direction.
+     */
+    public function testRenderNeverDisablesCacheAnyMore()
+    {
+        $this->assertTrue($this->renderIsCacheable('{{drawio>test:missing}}'));
+
+        $this->createMedia('test:blank.png', '');
+        $this->assertTrue($this->renderIsCacheable('{{drawio>test:blank}}'));
+
+        $this->createMedia('restricted:present.png');
+        $this->enableAcl(
+            [
+                '*             @ALL   8',
+                'restricted:*  @ALL   0',
+                'restricted:*  @boss  8',
+            ],
+            'admin',
+            ['boss']
+        );
+        $this->assertTrue($this->renderIsCacheable('{{drawio>restricted:present}}'));
     }
 }
 

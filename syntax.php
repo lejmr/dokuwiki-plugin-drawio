@@ -71,30 +71,41 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
      * Whether the current user may actually read this media file.
      *
      * media_exists() is a pure filesystem check - it says nothing about
-     * permissions. Using it alone to choose between the real fetch.php URL
-     * and the placeholder turns this plugin into an existence oracle across
-     * ACL boundaries: fetch.php itself returns an identical 403 whether a
-     * file is denied or simply absent, so any difference in *our* output is
-     * a disclosure this plugin invents, not one core makes.
+     * permissions. Used to gate the ODT export below: that export reads the
+     * media's bytes off disk itself, server-side, so it has to ask this
+     * explicitly - unlike xhtml, which never makes this check at all (see
+     * the comment on the xhtml <img> below for why).
      *
-     * The permission is decided on the namespace-wildcard ACL path the media
-     * id is actually governed by - media has no per-file ACLs. That is the
-     * whole body of core's mediaAclPath() (inc/auth.php), inlined because
-     * that helper does not exist on oldstable, whose own inc/media.php
-     * spells the identical expression out at the call sites that need it.
-     * action.php inlines it the same way, so both files ask the question
-     * exactly once and identically.
+     * The ACL path itself lives in helper::mediaAclPath() - see its docblock
+     * for why this and action.php ask different questions with it.
      *
      * @param string $media_id
      * @return bool
      */
     private function mayReadMedia($media_id)
     {
-        return auth_quickaclcheck(ltrim(getNS($media_id) . ':*', ':')) >= AUTH_READ;
+        $helper = plugin_load('helper', 'drawio');
+        return $helper && auth_quickaclcheck($helper->mediaAclPath($media_id)) >= AUTH_READ;
     }
 
     /**
      * Render xhtml, metadata or odt (issue #7) output
+     *
+     * dw2pdf (https://www.dokuwiki.org/plugin:dw2pdf), the other big export
+     * plugin besides odt, needs no entry here even though it renders under
+     * the mode name 'dw2pdf' (p_render('dw2pdf', ...), see its
+     * src/Writer.php): its renderer_plugin_dw2pdf is a Doku_Renderer_xhtml
+     * subclass that does not override getFormat(), and DokuWiki dispatches a
+     * syntax plugin through Doku_Renderer::plugin(), which calls
+     * render($this->getFormat(), ...) - the *renderer's* format, not the
+     * mode name p_render() was called with. getFormat() on an unoverridden
+     * Doku_Renderer_xhtml always returns 'xhtml', so this method already
+     * receives $mode === 'xhtml' for a dw2pdf export, reuses the exact same
+     * $renderer->doc-building code below, and a real PDF export already
+     * embeds the diagram - confirmed against dw2pdf's real renderer in a
+     * docker DokuWiki instance, debug HTML and rendered PDF both showing the
+     * <img>, ACL-denied diagrams still correctly falling back to the
+     * placeholder. There is nothing dw2pdf-specific to add.
      *
      * @param string        $mode     Renderer mode (supported modes: xhtml, metadata, odt)
      * @param Doku_Renderer $renderer The renderer
@@ -107,9 +118,7 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         if ($mode !== 'xhtml' && $mode !== 'metadata' && $mode !== 'odt') {
             return false;
         }
-		$renderer->nocache();
 
-        // Validate that the image exists otherwise pring a default image
         global $conf;
 
         $data = trim($data);
@@ -163,8 +172,13 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
             return true;
         }
 
-        // if no extention specified, use png
-        if(!in_array(pathinfo($media_id, PATHINFO_EXTENSION),array_map('trim',explode(",",$this->getConf('toolbar_possible_extension'))) )){
+        // if no extension specified, use png. This asks the same fixed
+        // png/svg pair action.php's save gate and helper.php's sourceID()
+        // do - not the admin's toolbar_possible_extension, which only
+        // decides which extensions the *toolbar* offers a new diagram with
+        // and, at its shipped default ('png'), would otherwise make
+        // {{drawio>plan.svg}} become 'plan.svg.png'.
+        if (!in_array(strtolower(pathinfo($media_id, PATHINFO_EXTENSION)), ['png', 'svg'], true)) {
             $media_id .= ".png";
         }
 
@@ -190,29 +204,6 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         // the markup unsanitized. hsc()/mediaUrl() below are defense in depth on
         // top of that, not a substitute for it.
         $media_id = (new \dokuwiki\File\MediaResolver("$current_ns:deprecated"))->resolveId($media_id);
-        $exists = media_exists($media_id, '', false);
-
-        // Security: a viewer who may not read this media must see the exact
-        // same thing as one where the file plain doesn't exist - anything
-        // else lets a page editor probe ACL-restricted namespaces file by
-        // file (see mayReadMedia() above). This intentionally does not touch
-        // metadata mode below: media-usage recording must happen regardless
-        // of who triggers the render (a save, the indexer, ...), exactly as
-        // core's own internalmedia()/_recordMediaUsage() do.
-        if ($exists && !$this->mayReadMedia($media_id)) {
-            $exists = false;
-        }
-
-        // issue #66: saving an empty diagram leaves a zero-byte media file behind,
-        // which is neither viewable nor (without this) clickable to fix again - treat
-        // it as missing everywhere (placeholder, odt export, ...) rather than just
-        // in the xhtml path below. This does NOT change metadata mode (issue #10):
-        // internalmedia() there goes through _recordMediaUsage(), which ignores the
-        // $exists we compute and re-derives existence itself via file_exists() - a
-        // zero-byte diagram is still correctly recorded as "used" either way.
-        if ($exists && @filesize(mediaFN($media_id)) === 0) {
-            $exists = false;
-        }
 
         // issue #10: the media manager reads media usage from page metadata, so
         // without this a diagram looks unused and is easy to delete by accident.
@@ -241,14 +232,67 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         // page with a dead link instead of the diagram would be strictly worse.
         //
         // A missing/empty diagram has nothing sensible to embed - skip it rather
-        // than exporting the on-wiki placeholder image into a document.
+        // than exporting the on-wiki placeholder image into a document. Unlike
+        // xhtml below, this reads the media's bytes off disk itself, server-side,
+        // so - unlike xhtml - it has no choice but to work out existence and
+        // permission right here.
         if ($mode === 'odt') {
+            $exists = media_exists($media_id, '', false);
+
+            // Security: an export must not embed a diagram the exporting user
+            // may not read - see mayReadMedia() above.
+            if ($exists && !$this->mayReadMedia($media_id)) {
+                $exists = false;
+            }
+
+            // issue #66: saving an empty diagram leaves a zero-byte media file
+            // behind - nothing sensible to embed either.
+            if ($exists && @filesize(mediaFN($media_id)) === 0) {
+                $exists = false;
+            }
+
             if ($exists) {
                 $renderer->_odtAddImage(mediaFN($media_id), $width, $height, null, $title);
             }
             return true;
         }
 
+        // xhtml from here on. Unlike odt above, this never asks whether the
+        // media exists or whether the current viewer may read it - on purpose.
+        //
+        // The <img>/<a> below is always the same lib/exe/fetch.php?media=...
+        // URL, for every diagram and every visitor, exactly like core's own
+        // {{image.png}} already works: fetch.php itself is what decides, at
+        // request time, whether to serve the bytes (checking the read ACL
+        // itself, see inc/fetch.functions.php's checkFileStatus()) or answer
+        // 404/403 - this plugin does not need to, and must not, duplicate
+        // that decision into the page's own HTML.
+        //
+        // Two things made this plugin do so anyway, once: showing the new
+        // diagram right after it's saved, and not leaking whether a diagram
+        // exists in a namespace the viewer can't read (SECURITY.md). Both
+        // are handled below, in the browser, instead of at render time:
+        //   - onerror swaps a failed image load to the on-wiki placeholder,
+        //     so a save is reflected on the very next view - there is
+        //     nothing server-side left to go stale, so nocache() is gone.
+        //   - the placeholder is reached identically whether fetch.php
+        //     answered 404 (missing) or 403 (exists but denied - namespace
+        //     ACL is checked *before* file existence in checkFileStatus(),
+        //     so within a namespace the viewer can't read, every media id
+        //     answers 403 whether or not it actually exists). The HTML is
+        //     byte-identical for every viewer regardless of who they are or
+        //     whether the diagram exists, which is what actually closes the
+        //     existence oracle - not a check this plugin performs and could
+        //     get wrong, and not something a shared page cache can leak
+        //     between visitors, because there is no per-visitor difference
+        //     left to leak.
+        //
+        // The one thing this loses: a *server-side* consumer of this same
+        // xhtml output that cannot run the onerror handler - dw2pdf, see the
+        // render() docblock above - shows nothing rather than the on-wiki
+        // placeholder for a missing diagram, same as core's own {{image.png}}
+        // already does for any missing image in a PDF export. ODT above is
+        // unaffected: it embeds bytes directly and always has its own gate.
         if ($linkonly) {
             $text = $title !== null ? $title : $media_id;
             $renderer->doc .= "<a href='".DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($media_id)."' id='".hsc($media_id)."'
@@ -261,13 +305,13 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
             $style .= "width:".$width."px;".($height !== null ? "height:".$height."px;" : "");
         }
         $alt = $title !== null ? $title : $media_id;
-        $src = $exists
-            ? DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($media_id)
-            : DOKU_BASE."lib/plugins/drawio/blank-image.png";
+        $src = DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($media_id);
+        $placeholder = DOKU_BASE."lib/plugins/drawio/blank-image.png";
 
         $renderer->doc .= "<img class='mediacenter' id='".hsc($media_id)."'
                         style='".$style."' onclick='edit(this);'
                         src='".$src."'
+                        onerror=\"this.onerror=null;this.src='".$placeholder."';\"
                         alt='".hsc($alt)."'".($title !== null ? " title='".hsc($title)."'" : "")." />";
         return true;
     }

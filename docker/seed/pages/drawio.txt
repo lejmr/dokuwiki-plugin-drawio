@@ -130,7 +130,7 @@ installed and enabled here - nothing to set up.
     printed document has no editor to click, so showing nothing would be
     worse than showing the picture.
 
-===== 13. The diagram source lives next to the image (issues #15, #66) =====
+===== 13. The diagram source lives next to the image =====
 
 A diagram used to exist only as an exported picture with its XML hidden inside
 it. Anything that rewrites media - an image optimiser, a format conversion, a
@@ -255,3 +255,34 @@ exactly the identity DokuWiki's own page lock uses for an anonymous editor -
 IP address plus browser session - so two different anonymous visitors are
 correctly treated as different people (and warn each other), while two tabs
 of the very same anonymous visitor's own session do not warn each other.
+===== 15. Bulk-converting old diagrams (the admin task) =====
+
+Section 13 above shows a diagram gaining its source lazily, one save at a
+time. There is also an admin task that gives *every* diagram a source in one
+pass, for someone who wants their whole wiki protected right now.
+
+  - Upload a PNG that has a draw.io ''mxfile'' XML chunk embedded but no
+    ''.drawio'' sibling yet (any export from an older version of this plugin,
+    or a real draw.io export, works) into a scratch namespace, e.g.
+    ''seedtest:old_diagram.png''. Also upload a plain, unrelated PNG as
+    ''seedtest:not_a_diagram.png'' with no embedded XML.
+  - Open [[?do=admin&page=drawio|Admin → Draw.io: convert old diagrams]].
+    This is only visible/reachable to a superuser, not a manager.
+  - You land on a **dry run**: it reports how many diagrams were found, how
+    many already have a source, and how many do not yet - and, below that, a
+    per-diagram table. ''seedtest:old_diagram.png'' should read "source can be
+    recovered from the image"; ''seedtest:not_a_diagram.png'' should read "no
+    draw.io XML found in the image - cannot be recovered". Nothing has been
+    written yet - check the media manager, there is still no
+    ''seedtest:old_diagram.drawio''.
+  - Click **Convert this batch**. The table now shows "source written" for
+    ''seedtest:old_diagram.png''; the media manager now lists
+    ''seedtest:old_diagram.drawio'' next to it. ''seedtest:not_a_diagram.png''
+    is unchanged - there was nothing to recover.
+  - Click the diagram on a page (or re-open it from the media manager's
+    **Edit with draw.io** button, section 11): it must load correctly, now
+    from its new source rather than from the image.
+  - Run the task again (dry run first): ''seedtest:old_diagram.png'' now
+    reads "already has a source - left untouched", and clicking **Convert
+    this batch** again must not change the file or its content - an existing
+    source is never overwritten.

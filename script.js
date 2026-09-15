@@ -62,13 +62,22 @@ var imagePointer = null;
 var editorOpen = false;
 
 function edit(image)
-{   
+{
     // check auth
     var imgPointer = image;
+    // get_auth now sends a JSON content type, like every other endpoint here,
+    // so `data` is the real boolean jQuery parsed it into - compare it as
+    // one, not against the string 'true' the old text/html response forced.
+    //
+    // silent: true because a denial (a 200 response carrying `false`, seen
+    // below) already shows nothing, and a failed request (expired sectok,
+    // network hiccup) is the more likely of the two - showing a generic
+    // "the request failed" alert for the *unlikely* case while staying
+    // silent for the likely one had it backwards.
     drawioPost('get_auth', imgPointer.getAttribute('id'), null, function (data) {
-        if (data != 'true') return;
+        if (data !== true) return;
         edit_cb(imgPointer);
-    });
+    }, true);
 }
 
 function edit_cb(image)
@@ -300,7 +309,12 @@ function edit_cb(image)
                     // Load it as an <img> instead, the same way the PNG
                     // branch above already does: a data: URI in an <img src>
                     // is decoded in image context, which never executes
-                    // scripts or handlers inside it.
+                    // scripts or handlers inside it. Also fixes: the old
+                    // replaceChild() swapped in a fresh <img> with a
+                    // hardcoded class/style, dropping the width/height/
+                    // title/alt syntax.php computed for this diagram until
+                    // the next page load - setAttribute('src', ...) on the
+                    // existing node, same as the PNG branch, keeps them.
                     //
                     // User-visible change: links inside an SVG diagram were
                     // only ever clickable in this specific post-save state,
@@ -311,16 +325,8 @@ function edit_cb(image)
                     // unaffected. Rendering wiki [[links]] *inside* a diagram
                     // (issue #61) is a different, larger feature and is not
                     // affected either way by this change.
-                    var tdElement = document.getElementById(image.id);
-                    var trElement = tdElement.parentNode;
-                    var svgImg = document.createElement('img');
-                    svgImg.setAttribute("class","mediacenter");
-                    svgImg.setAttribute("style","max-width:100%;cursor:pointer;");
-                    svgImg.setAttribute('onclick','edit(this);');
-                    svgImg.id = image.id;
-                    svgImg.src = msg.data;
-                    trElement.replaceChild(svgImg,tdElement);
-                    trElement.style.textAlign = "center" ;
+                    imgData = msg.data;
+                    image.setAttribute('src', imgData);
                 }
                 
 				close();

@@ -49,13 +49,13 @@ I will be extremelly happy if I receive any pull request with a bug fix or a new
 
 ## How to extend this plugin?
 
-In order to make the development as simple as possible, I prepared a Docker compose file. Using the *docker-compose* command one can simply start its development environment locally. 
+In order to make the development as simple as possible, I prepared a Docker compose file. Using the *docker compose* command one can simply start its development environment locally. 
 
 This is how to start local development server:
 
-```docker-compose up```
+```docker compose up --build```
   
-Wait until server is started, and feel free to login using *superuser:password* credentials and go on and develop. The development server is available at address http://localhost:8080
+Wait until server is started, and feel free to login using *admin:admin* credentials (generated on first start; override with DW_ADMIN_PASSWORD) and go on and develop. The development server is available at address http://localhost:8080
 
 
 ## ODT export support
@@ -91,3 +91,25 @@ that difference is silently merged the first time either one is next saved -
 whichever is saved first becomes `plan.drawio`, and both formats open from it
 from then on. The plugin has no way to detect this case from the file bytes
 alone; rename one of the two diagrams first if your wiki has this shape.
+
+## Converting old diagrams to a stored source, all at once
+
+A diagram picks up its `.drawio` source lazily, the first time it is next
+saved - see above. A diagram nobody happens to save stays without one, and so
+stays at risk of losing its editable XML if something ever rewrites its image
+(an optimiser, a format conversion, a re-encoding backup).
+
+Admins (real superusers, not just managers) can convert every diagram at once
+instead of waiting: **Admin → Draw.io: convert old diagrams**. It always shows
+a dry run first - how many diagrams already have a source, how many can be
+recovered from their image, and how many cannot be recovered at all - and only
+writes anything once you press *Convert this batch*. It never overwrites a
+source that already exists.
+
+On a large wiki the page works through the media tree in batches (a few
+hundred diagrams per click) rather than trying to do everything in one
+request; keep clicking *Scan next batch* / *Convert this batch* until it
+reports everything has been scanned. Diagrams it cannot recover a source for
+(no draw.io XML was ever embedded in the image to begin with) are reported,
+not silently skipped - there is nothing to convert for those, and nothing this
+task can do about it.
