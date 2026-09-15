@@ -78,9 +78,11 @@ body and the zip attached. A version that was already released, or a
 version with no `CHANGELOG.md` section, is refused before anything is
 touched - so add the changelog entry first.
 
-The one thing the workflow can't do for you: the run's **summary** (and the
-release notes) end with a `---- plugin ----` block, ready to paste over the
-one on <https://www.dokuwiki.org/plugin:drawio>. Copy it, paste it, save -
+The one thing the workflow can't do for you: the run's **summary** ends with
+a `---- plugin ----` block (its `compatible` line comes from the DokuWiki
+versions that run's tests actually passed against), ready to paste over the
+one on <https://www.dokuwiki.org/plugin:drawio>. It is deliberately not in
+the public release notes. Copy it, paste it, save -
 that page is what DokuWiki's updater and the extension search actually read,
 and bumping `plugin.info.txt` alone does not reach it (this is why issue #67
 stayed open for four years). `downloadurl` in that block points at the
