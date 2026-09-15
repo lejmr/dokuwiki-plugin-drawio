@@ -78,7 +78,7 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
      */
     public function render($mode, Doku_Renderer $renderer, $data)
     {
-        if ($mode !== 'xhtml') {
+        if ($mode !== 'xhtml' && $mode !== 'metadata') {
             return false;
         }
 		$renderer->nocache();
@@ -131,7 +131,9 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         $colon = strrpos($media_id, ':');
         $leaf = substr($media_id, $colon === false ? 0 : $colon + 1);
         if ($leaf === '') {
-            $renderer->doc .= "<span class='drawio-error'>drawio: no diagram name given in '".hsc($data)."'</span>";
+            if ($mode === 'xhtml') {
+                $renderer->doc .= "<span class='drawio-error'>drawio: no diagram name given in '".hsc($data)."'</span>";
+            }
             return true;
         }
 
@@ -146,6 +148,13 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         // markup unsanitized. hsc()/mediaUrl() below are defense in depth on
         // top of that, not a substitute for it.
 		resolve_mediaid($current_ns, $media_id, $exists);
+
+        // issue #10: the media manager reads media usage from page metadata, so
+        // without this a diagram looks unused and is easy to delete by accident.
+        if ($mode === 'metadata') {
+            $renderer->internalmedia($media_id, $title);
+            return true;
+        }
 
         if ($linkonly) {
             $text = $title !== null ? $title : $media_id;
