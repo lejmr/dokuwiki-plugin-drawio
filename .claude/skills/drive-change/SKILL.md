@@ -1,9 +1,9 @@
 ---
-name: validated-change
+name: drive-change
 description: The whole path from a feature request or issue to a merged, released change - roles, evidence rules, fresh-container validation, maintainer batches, snapshot-tree PRs, changelog and the release button - use for every fix, feature, fork integration or release, whichever model runs it
 ---
 
-# Validated change
+# Drive a change
 
 This repository lies dormant for long stretches and is maintained through
 agents. Everything below exists because of concrete failures in September
