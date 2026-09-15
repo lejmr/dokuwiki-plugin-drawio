@@ -11,6 +11,17 @@ function drawioConf() {
     return (typeof JSINFO !== 'undefined' && JSINFO['plugin_drawio']) ? JSINFO['plugin_drawio'] : null;
 }
 
+// JSINFO itself is not guaranteed to be declared at all - it is emitted by
+// core's jsinfo()/tpl_metaheaders(), which not every template/popup calls
+// (issue #37: a Snippets-plugin popup skips it entirely). A bare `JSINFO`
+// reference in that case is a ReferenceError, not a friendly `undefined` -
+// same class of load-time throw as #16, just one property up. Route every
+// read of JSINFO.id through here so no caller can reintroduce the bare
+// reference.
+function drawioPageId() {
+    return (typeof JSINFO !== 'undefined' && JSINFO) ? JSINFO.id : null;
+}
+
 // Every ajax call to this plugin must carry DokuWiki's CSRF/security token
 // (published as JSINFO['plugin_drawio']['sectok']) as the `sectok` request
 // param - the server-side handler now requires a valid one and rejects
@@ -501,7 +512,7 @@ function edit_cb(image)
 
 // Toolbar menu items
 function getImageName(){
-    seq = JSINFO.id.split(":");
+    seq = drawioPageId().split(":");
     seq = seq.slice(0,seq.length-1);
     seq.push("diagram1");
     return seq.join(":");
@@ -532,7 +543,7 @@ function getImageName(){
 // of this file warns about (it killed core's own styling/usermanager/
 // locktimer code after it, the same failure mode as #16). Skip the whole
 // block when there is no page id to build a link for.
-if (typeof window.toolbar !== 'undefined' && JSINFO && typeof JSINFO.id === 'string' && JSINFO.id) {
+if (typeof window.toolbar !== 'undefined' && typeof drawioPageId() === 'string' && drawioPageId()) {
     // toobar definition in case of multi extension defined in conf
     if (toolbarPossibleExtension.length >1 ) {
         toolbar[toolbar.length] = {

@@ -489,11 +489,41 @@
 					// exports, 3 to 31 occurrences each) - rejecting it would
 					// reject the plugin's own output.
 					//
-					// ponytail: 'javascript:' and '<use' are literal scans, so a
-					// diagram whose label happens to contain the text
-					// "javascript:" is refused. Narrow the scan to attribute
-					// values if anyone ever hits that.
-					if (preg_match('/<(script|iframe|html|body|use)[\s>]/i', $decoded)
+					// ponytail: 'javascript:' is a literal scan, so a diagram
+					// whose label happens to contain the text "javascript:" is
+					// refused. Narrow the scan to attribute values if anyone
+					// ever hits that.
+					//
+					// <use> is not on the blanket tag blocklist below because a
+					// real math export (Extras > Mathematical Typesetting) is
+					// one: MathJax's default SVG output renders every formula
+					// as a local <defs>/<use> pair (fontCache: 'local', see
+					// MathJax's SVG output docs) purely to reuse glyph paths
+					// within the *same* document - rejecting it outright
+					// rejected the plugin's own legitimate output (issue #49).
+					// What is still not allowed is a <use> that reaches
+					// outside the document it lives in: only a same-document
+					// fragment reference (href="#...") is permitted, so a
+					// <use> pointing at an external SVG, a data: URI, or a
+					// javascript: URL is rejected exactly as before.
+					// Every href-like attribute of every <use> must be a
+					// fragment: SVG2 prefers href over xlink:href, so checking
+					// only the first one found would let a second, external
+					// one through. Quoted values may contain '>', hence the
+					// quote-aware tag match.
+					$badUse = false;
+					if (preg_match_all('/<use\b((?:[^>"\x27]|"[^"]*"|\x27[^\x27]*\x27)*)>/i', $decoded, $useTags)) {
+						foreach ($useTags[1] as $attrs) {
+							if (preg_match_all('/(?:xlink:)?href\s*=\s*(?:"([^"]*)"|\x27([^\x27]*)\x27|([^\s>]+))/i', $attrs, $hrefs, PREG_SET_ORDER)) {
+								foreach ($hrefs as $h) {
+									$val = ltrim($h[1] . $h[2] . (isset($h[3]) ? $h[3] : ''));
+									if ($val === '' || $val[0] !== '#') { $badUse = true; break 2; }
+								}
+							}
+						}
+					}
+					if ($badUse
+						|| preg_match('/<(script|iframe|html|body)[\s>]/i', $decoded)
 						|| preg_match('/[\s"\x27]on\w+\s*=/i', $decoded)
 						|| stripos($decoded, 'javascript:') !== false) {
 						http_status(400);
