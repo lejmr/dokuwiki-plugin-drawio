@@ -125,6 +125,29 @@ class helper_plugin_drawio extends DokuWiki_Plugin
     }
 
     /**
+     * The id of the *other* rendering of the same diagram - png for an svg,
+     * svg for a png.
+     *
+     * Used by action.php's delete/rename cascade to decide whether a shared
+     * .drawio source may follow the rendering being deleted or moved: it may
+     * only do so once neither rendering needs it under its old name any
+     * more. See that file's _media_delete_sibling()/_move_sibling() for the
+     * reasoning; this is purely the id computation, kept here next to
+     * sourceID() because it is the same "one diagram, two renderings"
+     * identity, not a new one.
+     *
+     * @param string $media_id e.g. 'ns:plan.png'
+     * @return string          e.g. 'ns:plan.svg', or '' if this is not a diagram
+     */
+    public function otherRenderingID($media_id)
+    {
+        if (!$this->isDiagramExtension($media_id)) return '';
+        $ext = strtolower(pathinfo($media_id, PATHINFO_EXTENSION));
+        $other = ($ext === 'png') ? 'svg' : 'png';
+        return substr($media_id, 0, -strlen($ext)) . $other;
+    }
+
+    /**
      * Whether this looks like the XML draw.io hands out.
      *
      * Not a validator for the XML itself - it is the same class of check as
@@ -251,5 +274,83 @@ class helper_plugin_drawio extends DokuWiki_Plugin
         if ($this->isDiagramXml($value)) return $value;
         $decoded = rawurldecode((string) $value);
         return $this->isDiagramXml($decoded) ? $decoded : '';
+    }
+
+    /**
+     * The readable words inside a diagram's stored XML, for the search
+     * index - see action.php's _index_diagrams() for the ACL rule that
+     * decides *whether* a given diagram's text is allowed to reach here at
+     * all; this only does the extraction once that has already said yes.
+     *
+     * draw.io stores each page of a diagram as one <diagram> element inside
+     * <mxfile>, and its content is either the mxGraphModel XML directly (an
+     * older export, or a real draw.io export saved with compression turned
+     * off - verified against this branch's own real-drawio-export.svg
+     * fixture) or, far more commonly in the wild, base64(deflate_raw(
+     * encodeURIComponent(xml))) - verified against real-drawio-export.png
+     * and real-drawio-export-ztxt.png, both of which use the compressed
+     * form. Both are handled; which one a given <diagram> uses is told apart
+     * by whether its trimmed content starts with '<' - plain XML always
+     * does, and base64 alphabet never contains '<'.
+     *
+     * A label's actual text sits in each element's value="..." attribute,
+     * HTML-escaped, and - for anything beyond a single line - containing
+     * real markup ("<div>JavaScript</div><div>Source Code<br></div>" for a
+     * two-line label, verified against real-drawio-export.png). Tags are
+     * stripped after the entities are decoded, not before, so an escaped
+     * "&lt;" that is part of someone's actual label text is not mistaken
+     * for markup, and a real tag is not left in the indexed text as a
+     * literal "<div>".
+     *
+     * Bounded three ways, because the input is an untrusted file (or, once
+     * the admin migration task exists, a great many of them, unattended):
+     * gzinflate()'s own $length argument caps decompression output so a
+     * small deflate stream cannot be crafted to expand into gigabytes of
+     * memory (a save through this plugin already caps the XML at 2 MiB
+     * before it is written - see action.php's 'save' handler - but that cap
+     * does not protect a .drawio placed directly into data/media by hand or
+     * by another tool); and the returned text itself is capped, because the
+     * point of indexing is findability, not reproducing the diagram in the
+     * index - a page whose diagram runs to hundreds of labels is exactly as
+     * findable with the first few hundred as with all of them, and the cap
+     * is what stops a wiki with a handful of huge diagrams from growing an
+     * unbounded index. 20000 characters is generous against real exports
+     * (this branch's own fixtures extract to a few hundred) while still
+     * being a small, fixed amount of extra work per page indexed.
+     *
+     * @param string $xml the diagram's stored source (a whole .drawio file)
+     * @return string      space-separated words, '' if there is nothing to index
+     */
+    public function diagramIndexText($xml)
+    {
+        if (!preg_match_all('/<diagram\b[^>]*>(.*?)<\/diagram>/is', (string) $xml, $diagrams)) return '';
+
+        $cap = 20000;
+        $out = '';
+        foreach ($diagrams[1] as $content) {
+            if (strlen($out) >= $cap) break;
+
+            $content = trim($content);
+            if ($content === '') continue;
+
+            if ($content[0] !== '<') {
+                // compressed: base64 -> raw deflate -> URL-encoded XML
+                $decoded = base64_decode($content, true);
+                if ($decoded === false) continue;
+                $inflated = @gzinflate($decoded, 5 * 1024 * 1024);
+                if ($inflated === false) continue;
+                $content = rawurldecode($inflated);
+            }
+
+            if (!preg_match_all('/\bvalue\s*=\s*(["\'])(.*?)\1/is', $content, $values)) continue;
+            foreach ($values[2] as $value) {
+                $text = trim(strip_tags(html_entity_decode($value, ENT_QUOTES | ENT_XML1, 'UTF-8')));
+                if ($text === '') continue;
+                $out .= ' ' . $text;
+                if (strlen($out) >= $cap) break;
+            }
+        }
+
+        return trim(substr($out, 0, $cap));
     }
 }

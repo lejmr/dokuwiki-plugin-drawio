@@ -255,7 +255,7 @@ exactly the identity DokuWiki's own page lock uses for an anonymous editor -
 IP address plus browser session - so two different anonymous visitors are
 correctly treated as different people (and warn each other), while two tabs
 of the very same anonymous visitor's own session do not warn each other.
-===== 15. Bulk-converting old diagrams (the admin task) =====
+===== 16. Bulk-converting old diagrams (the admin task) =====
 
 Section 13 above shows a diagram gaining its source lazily, one save at a
 time. There is also an admin task that gives *every* diagram a source in one
@@ -287,7 +287,7 @@ pass, for someone who wants their whole wiki protected right now.
     this batch** again must not change the file or its content - an existing
     source is never overwritten.
 
-===== 16. Configurable editor interface (ui=atlas was hardcoded) =====
+===== 17. Configurable editor interface (ui=atlas was hardcoded) =====
 
 The editor's interface (kennedy/min/atlas/dark/sketch/simple) used to be
 hardcoded to ''atlas''. It is now a config setting.
@@ -299,3 +299,65 @@ hardcoded to ''atlas''. It is now a config setting.
     Minimal interface, not Atlas.
   - The setting only offers the six values draw.io's ''ui'' parameter
     actually understands - there is no free-text field to get this wrong in.
+===== 18. The source survives delete and rename =====
+
+Section 13 is what keeps a diagram's XML alive across an upload that
+rewrites the image. It did nothing, until now, about the media manager's own
+delete and rename - deleting ''plan.png'' left ''plan.drawio'' behind
+forever, and renaming it left the source under the old name.
+
+  - Draw and save a diagram, e.g. ''seedtest:deleteme.png'' - check the
+    media manager shows ''seedtest:deleteme.drawio'' next to it (section 13).
+  - Delete ''seedtest:deleteme.png'' in the media manager. **Both** files
+    must disappear - the source goes with the image, deliberately: "delete"
+    means the diagram is gone, not "gone except for a file nobody asked to
+    keep". This is not as final as it sounds - with ''mediarevisions'' on
+    (the default) both files went to the attic, the same as any deleted
+    media, and the page's //Old revisions// / //History// panel for
+    ''seedtest:deleteme.drawio'' lists the deleted revision with a working
+    **Restore this old version**.
+  - Redraw it, this time as **two** renderings sharing one source: save
+    ''seedtest:shared.png'', then add ''{{drawio>seedtest:shared.svg}}'' to a
+    scratch page and open it once (section 14 - both read the same
+    ''seedtest:shared.drawio''). Delete only ''seedtest:shared.png''. The
+    source must **stay** - ''seedtest:shared.svg'' is still there and still
+    needs it. Now delete ''seedtest:shared.svg'' too: the source must
+    **now** disappear, since nothing needs it any more.
+  - Delete ''seedtest:deleteme.drawio'' directly, on a diagram whose image is
+    still there. The image must be left alone - it still opens, from its own
+    embedded XML, exactly as every diagram did before source-of-truth
+    existed; deleting a small text file must never reach out and delete
+    somebody's picture.
+  - Rename/move a diagram (needs the third-party
+    [[https://www.dokuwiki.org/plugin:move|move]] plugin - not part of this
+    plugin, but the only way a real wiki renames media at all). Draw and save
+    ''seedtest:before.png'', then rename it to ''seedtest:after.png'' (or
+    into a different namespace). ''seedtest:before.drawio'' must be gone and
+    ''seedtest:after.drawio'' must exist with the same content - open the
+    diagram afterwards and confirm your drawing is still there. Same
+    two-renderings rule as delete: if ''seedtest:before.svg'' still exists
+    after renaming only the ''.png'', the source must stay put for it.
+
+===== 19. Diagram text is findable in search =====
+
+A diagram's labels used to be invisible to DokuWiki's own search - a page
+whose architecture diagram says "firewall" could not be found by searching
+for "firewall". The XML now on disk changes that.
+
+  - Draw a diagram with a labelled shape containing a distinctive word that
+    appears **nowhere else on the page**, e.g. ''zzsearchable'', and save it
+    on a page, e.g. ''seedtest:searchpage''.
+  - Search for ''zzsearchable'' ([[?do=search&q=zzsearchable|search now]]).
+    If nothing is found, the indexer has not caught up yet - reload
+    ''seedtest:searchpage'' once (that queues it) or run
+    ''bin/indexer.php'' - then search again. The page must now be found,
+    even though the word exists only inside the diagram, not in the page's
+    own wikitext.
+  - **The part that must not work:** put the same kind of diagram on a
+    **publicly readable** page, but store the diagram itself in a namespace
+    your ACL denies to ordinary readers (e.g. draw
+    ''secret:hiddenlabel.png'' with a distinctive word in it, restricted by
+    an ACL rule such as ''secret:* @ALL 0'', and reference it from a public
+    page). Reindex, then search for that word as a normal (non-admin) user.
+    It must **not** be found - a page anyone can read must never hand out a
+    restricted diagram's text through search just because it embeds it.

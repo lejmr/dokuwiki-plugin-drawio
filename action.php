@@ -19,6 +19,30 @@
             $controller->register_hook('MEDIAMANAGER_STARTED', 'AFTER', $this, 'addjsinfo');
             $controller->register_hook('AJAX_CALL_UNKNOWN', 'BEFORE', $this,'_ajax_call');
             // $controller->register_hook('TOOLBAR_DEFINE', 'AFTER', $this, 'insert_button', array ());
+
+            // The sibling lifecycle: a diagram's .drawio source has to follow
+            // its image through the operations DokuWiki's media manager (and
+            // the widely-installed move plugin) already support, or the whole
+            // point of storing it - surviving an optimiser/re-encode/backup
+            // that rewrites the image - is undone by an ordinary delete or
+            // rename. See _media_delete_sibling()/_move_sibling() below for
+            // the reasoning behind each direction.
+            $controller->register_hook('MEDIA_DELETE_FILE', 'AFTER', $this, '_media_delete_sibling');
+            // Core has no media rename/move event of its own - deleting the
+            // old id and uploading the new one is literally how a media
+            // manager rename works without this plugin (https://www.dokuwiki.
+            // org/tips:rename_pages_and_media, "There is no such feature in
+            // DokuWiki core"). The move plugin (https://www.dokuwiki.org/
+            // plugin:move) is what everyone actually uses for this, and its
+            // helper_plugin_move_op::moveMedia() fires this event around the
+            // move (verified against michitux/dokuwiki-plugin-move HEAD,
+            // helper/op.php) - AFTER, once the image has actually moved.
+            $controller->register_hook('PLUGIN_MOVE_MEDIA_RENAME', 'AFTER', $this, '_move_sibling');
+
+            // Diagram text into the fulltext index - see _index_diagrams()
+            // for the ACL rule this applies before ever reading a byte of a
+            // diagram into a page's index.
+            $controller->register_hook('INDEXER_PAGE_ADD', 'BEFORE', $this, '_index_diagrams');
         }
         
         // function insert_button(Doku_Event $event, $param) {
@@ -694,12 +718,230 @@
                 }
             }
             if($action == 'draft_get'){
-                header('Content-Type: application/json');	
+                header('Content-Type: application/json');
                 if (file_exists($fl)){
                     echo file_get_contents($fl);
                 }else {
                     echo json_encode(["content" => "NaN"]);
                 }
+            }
+        }
+
+        /**
+         * Delete an image's diagram source along with it.
+         *
+         * The maintainer's call, not a default arrived at by process of
+         * elimination: deleting a diagram in the media manager deletes it -
+         * no .drawio left behind that nobody asked to keep. This is not as
+         * destructive as it sounds: with mediarevisions on (the default),
+         * core's media_delete() already sent the deleted image to the attic
+         * before this hook even runs, and calling media_delete() again below
+         * for the source does exactly the same for it - "delete" undoes on
+         * both halves exactly as far as it undoes on one.
+         *
+         * The one case this does NOT cascade: ns:plan.png and ns:plan.svg
+         * are two renderings of the very same diagram (see helper.php's
+         * sourceID()) and share one ns:plan.drawio. Deleting just the .png
+         * has not deleted "the diagram" - the .svg rendering is still there,
+         * still editable, and ns:plan.drawio is still its source, not an
+         * orphan. So the cascade only runs once the *other* rendering is
+         * also gone; deleting the second one then deletes the source, in
+         * whatever order the two deletes happen (each call only ever looks
+         * at what is on disk *right now*).
+         *
+         * The reverse direction - deleting the .drawio itself - is
+         * deliberately NOT handled here or anywhere: it does not delete the
+         * image. Rationale: the image is not made worthless by losing its
+         * source, only less capable - it still opens (from its own embedded
+         * XML, exactly as every diagram did before this feature existed;
+         * see action.php's _source_xml()), it is just not preloaded from a
+         * separately-editable source any more. Deleting a small text file
+         * and having that silently delete somebody's picture is the more
+         * surprising direction of the two, so it does not happen.
+         *
+         * media_delete() (not a bare unlink()) both to get the attic/
+         * changelog behaviour above for free and because it fires
+         * MEDIA_DELETE_FILE itself - a backup plugin watching that event
+         * hears about the source exactly the way it hears about the image,
+         * with no second event type to teach it about. That also means this
+         * hook re-enters itself once for the source's own delete; it is
+         * harmless because helper::sourceID('ns:plan.drawio') is '' (a
+         * .drawio is not itself a diagram *rendering*), so the second call
+         * returns immediately.
+         *
+         * ACL: deliberately re-checked by media_delete() itself
+         * (auth_quickaclcheck() against the source's own namespace, which is
+         * always the same namespace the image lived in) rather than assumed
+         * from the image's delete having already been permitted - cheap,
+         * and it is what keeps this correct if that ever changes.
+         *
+         * @param Doku_Event $event MEDIA_DELETE_FILE, fired AFTER
+         */
+        function _media_delete_sibling(Doku_Event $event, $param) {
+            // Nothing was actually deleted (permission race, already gone,
+            // disk error) - nothing to cascade.
+            if (empty($event->data['unl'])) return;
+
+            $media_id = $event->data['id'];
+            $helper = plugin_load('helper', 'drawio');
+            if (!$helper) return;
+
+            $src_id = $helper->sourceID($media_id);
+            if ($src_id === '') return; // not a png/svg rendering - nothing owns a source
+
+            $other = $helper->otherRenderingID($media_id);
+            if ($other !== '' && file_exists(mediaFN($other))) return; // still needed
+
+            if (!file_exists(mediaFN($src_id))) return; // nothing to delete
+
+            media_delete($src_id, AUTH_DELETE);
+        }
+
+        /**
+         * Keep a diagram's source with its image across a rename/move.
+         *
+         * DokuWiki core has no rename/move for media at all - the media
+         * manager doing a delete-then-reupload is literally what core tells
+         * you to do instead (https://www.dokuwiki.org/tips:rename_pages_and_
+         * media). Every wiki that actually renames media without losing its
+         * history does so with the third-party move plugin
+         * (https://www.dokuwiki.org/plugin:move) - "widely installed" is not
+         * a guess, it is the only way this operation exists at all - so its
+         * event is what this hooks, not core's.
+         *
+         * Symmetric with _media_delete_sibling() above, same reasoning: the
+         * source only moves once nothing under the *old* name still needs it
+         * there. If ns:plan.png and ns:plan.svg share ns:plan.drawio and only
+         * the .png is renamed, the .svg is still ns:plan.svg and still reads
+         * its source from ns:plan.drawio - moving that out from under it
+         * would break the untouched rendering to fix the renamed one.
+         *
+         * Renaming a .drawio file directly is, again, not handled - same
+         * reasoning as the delete direction: this plugin never lets a write
+         * to a small text file reach out and rename somebody's picture.
+         *
+         * No MEDIA_DELETE_FILE-style core event exists to reuse for "this
+         * file now lives somewhere else", so the source is moved directly
+         * (io_rename(), the same primitive the move plugin's own
+         * helper_plugin_move_op::moveMedia() uses) and MEDIA_UPLOAD_FINISH is
+         * fired for its new location - the same event, same data shape, the
+         * plugin's own save path already fires for a freshly-written source
+         * (see _ajax_call()'s 'save' handler), so a backup plugin already
+         * watching that event needs nothing new to also pick up the moved
+         * file at its new id.
+         *
+         * @param Doku_Event $event PLUGIN_MOVE_MEDIA_RENAME, fired AFTER
+         */
+        function _move_sibling(Doku_Event $event, $param) {
+            $src_id = $event->data['src_id'] ?? null;
+            $dst_id = $event->data['dst_id'] ?? null;
+            if (!$src_id || !$dst_id) return;
+
+            $helper = plugin_load('helper', 'drawio');
+            if (!$helper || !$helper->isDiagramExtension($src_id)) return;
+
+            $src_source_id = $helper->sourceID($src_id);
+            if ($src_source_id === '') return;
+            $src_source_fl = mediaFN($src_source_id);
+            if (!file_exists($src_source_fl)) return; // nothing to move
+
+            // the other rendering, still under its OLD (unmoved) name, may
+            // still depend on this exact source - leave it in place for it
+            $other = $helper->otherRenderingID($src_id);
+            if ($other !== '' && file_exists(mediaFN($other))) return;
+
+            // the destination has to itself be a diagram rendering (a rename
+            // straight to, say, .txt has no source identity to move to), and
+            // must not already have its own source - never clobber an
+            // existing, unrelated file at the destination
+            $dst_source_id = $helper->sourceID($dst_id);
+            if ($dst_source_id === '') return;
+            $dst_source_fl = mediaFN($dst_source_id);
+            if (file_exists($dst_source_fl)) return;
+
+            io_createNamespace($dst_source_id, 'media');
+            if (!io_rename($src_source_fl, $dst_source_fl)) return;
+
+            list(, $mime) = mimetype($dst_source_id);
+            $data = [basename($dst_source_fl), $dst_source_fl, $dst_source_id, $mime, false, null];
+            \dokuwiki\Extension\Event::createAndTrigger('MEDIA_UPLOAD_FINISH', $data, null, false);
+        }
+
+        /**
+         * Add a page's diagrams' text to what the search index has for it.
+         *
+         * Without this, the words inside a diagram - what its search-worthy
+         * content actually is - are invisible to DokuWiki's own search: a
+         * page whose architecture diagram says "firewall" cannot be found by
+         * searching "firewall". helper::diagramIndexText() does the actual
+         * extraction (compressed or plain <diagram> content, HTML-escaped
+         * labels, markup stripped); this is only the wiring and, critically,
+         * the ACL rule below.
+         *
+         * ACL, the part that can leak: DokuWiki's fulltext index is one
+         * shared blob per page, searched under the *page's* permission, not
+         * the media's - core has no notion of "this word in this page's
+         * index came from a namespace only some readers may see". So if a
+         * page anyone can read embeds a diagram from a namespace only some
+         * readers may read, and that diagram's text goes into the page's
+         * index unconditionally, then anyone who can read the page can find
+         * (and, from a snippet, partially read) that diagram's content
+         * through search, whether or not *they* may open the diagram itself.
+         * That is a disclosure through a new door, not a new class of bug -
+         * exactly what SECURITY.md's audit spent itself closing everywhere
+         * else in this plugin.
+         *
+         * The rule chosen: only index a diagram whose namespace is readable
+         * by *anonymous* access ($user = '', $groups = [], i.e. "the general
+         * public", the least access any actual reader of the page could
+         * have). This is deliberately more conservative than "readable by
+         * the current indexing run's user" (indexing typically runs as
+         * whoever last saved the page, or as a background job - neither is
+         * "every future reader of the page's search results"), and more
+         * conservative than "same namespace as the page" (a namespace's ACL
+         * can differ from its parent's). The alternative this docblock's
+         * brief floated - never index a diagram in an ACL-restricted
+         * namespace at all - was considered and rejected: it would also
+         * refuse to index a diagram that IS in fact public (an ACL rule
+         * granting @ALL explicitly, rather than the namespace being
+         * unmentioned in the ACL at all), for no security reason - the
+         * anonymous-readability check already covers that case correctly
+         * without being that blunt.
+         *
+         * Bound: the extracted text for one page's diagrams combined is
+         * capped inside helper::diagramIndexText() - see its own docblock
+         * for the number and why - so a wiki with a handful of huge diagrams
+         * cannot make one page's index entry unbounded.
+         *
+         * @param Doku_Event $event INDEXER_PAGE_ADD, fired BEFORE
+         */
+        function _index_diagrams(Doku_Event $event, $param) {
+            $media_ids = $event->data['metadata']['relation_media'] ?? [];
+            if (empty($media_ids)) return;
+
+            $helper = plugin_load('helper', 'drawio');
+            if (!$helper) return;
+
+            $budget = 20000; // helper::diagramIndexText()'s own per-diagram cap; this is the page-wide total
+            $extra = '';
+            foreach ($media_ids as $media_id) {
+                if (strlen($extra) >= $budget) break;
+                if (!$helper->isDiagramExtension($media_id)) continue;
+
+                $src_id = $helper->sourceID($media_id);
+                if ($src_id === '') continue;
+                $src_fl = mediaFN($src_id);
+                if (!file_exists($src_fl) || filesize($src_fl) === 0) continue;
+
+                // anonymous readability - see this function's own docblock
+                if (auth_aclcheck($helper->mediaAclPath($src_id), '', []) < AUTH_READ) continue;
+
+                $text = $helper->diagramIndexText(file_get_contents($src_fl));
+                if ($text !== '') $extra .= ' ' . $text;
+            }
+
+            if ($extra !== '') {
+                $event->data['body'] = trim($event->data['body'] . ' ' . substr($extra, 0, $budget));
             }
         }
     }

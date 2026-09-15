@@ -22,10 +22,14 @@ class action_plugin_drawio_test extends DokuWikiTest
     /** @var array captured MEDIA_UPLOAD_FINISH event data, one entry per fired event */
     protected $firedEvents = [];
 
+    /** @var array captured MEDIA_DELETE_FILE ids, one entry per fired event */
+    protected $deletedMediaIds = [];
+
     public function setUp(): void
     {
         parent::setUp();
         $this->firedEvents = [];
+        $this->deletedMediaIds = [];
 
         // auth_aclcheck()/auth_quickaclcheck() read this even with ACL disabled
         global $USERINFO;
@@ -39,11 +43,19 @@ class action_plugin_drawio_test extends DokuWikiTest
 
         global $EVENT_HANDLER;
         $EVENT_HANDLER->register_hook('MEDIA_UPLOAD_FINISH', 'AFTER', $this, 'captureMediaUploadFinish');
+        // AFTER the plugin's own _media_delete_sibling(), which is also
+        // registered AFTER - so this always sees whatever it cascaded too.
+        $EVENT_HANDLER->register_hook('MEDIA_DELETE_FILE', 'AFTER', $this, 'captureMediaDeleteFile');
     }
 
     public function captureMediaUploadFinish(Doku_Event $event, $param)
     {
         $this->firedEvents[] = $event->data;
+    }
+
+    public function captureMediaDeleteFile(Doku_Event $event, $param)
+    {
+        $this->deletedMediaIds[] = $event->data['id'];
     }
 
     /**
@@ -1348,5 +1360,303 @@ class action_plugin_drawio_test extends DokuWikiTest
         $this->assertSame(array_keys($dataExisting), array_keys($dataMissing));
         $this->assertNull($dataExisting['locked_by']);
         $this->assertNull($dataMissing['locked_by']);
+    }
+
+    // --- the sibling follows the image through delete and rename ---------
+    //
+    // DokuWiki's media manager knows nothing about the png/svg <-> drawio
+    // pairing. Without this, deleting or renaming a diagram's image orphans
+    // its source - the exact thing the source-of-truth feature exists to
+    // prevent.
+
+    protected function put($mediaId, $content = 'bytes')
+    {
+        $file = mediaFN($mediaId);
+        io_makeFileDir($file);
+        file_put_contents($file, $content);
+        return $file;
+    }
+
+    /** Fire MEDIA_DELETE_FILE the same shape core's media_delete() builds it. */
+    protected function fireMediaDeleteFile($mediaId, $unlinked = true)
+    {
+        $data = [
+            'id' => $mediaId,
+            'name' => noNS($mediaId),
+            'path' => mediaFN($mediaId),
+            'size' => 0,
+            'unl' => $unlinked,
+            'del' => false,
+        ];
+        \dokuwiki\Extension\Event::createAndTrigger('MEDIA_DELETE_FILE', $data, null, false);
+    }
+
+    /**
+     * The maintainer's decision: deleting a diagram's only rendering deletes
+     * its source too - "delete" means the diagram is gone, not "gone except
+     * for a file nobody asked to keep". media_delete() is used for the
+     * cascade (not unlink()), so this is also proof it fires
+     * MEDIA_DELETE_FILE for the source - a backup plugin hears about it
+     * exactly the way it hears about the image.
+     */
+    public function testDeletingTheOnlyRenderingDeletesItsSource()
+    {
+        // media_delete() (the cascade's own delete path) recomputes ACL
+        // itself and requires AUTH_DELETE, which ACL-disabled test runs
+        // never grant (auth_quickaclcheck() caps out at AUTH_UPLOAD with
+        // useacl off) - so this needs it explicitly, same as
+        // testDeletingViaCoreMediaDeleteCascadesLive() below.
+        $this->enableAcl(['test:* @ALL 16']);
+        $this->put('test:delone.drawio', $this->diagramXml());
+        $this->assertFileExists(mediaFN('test:delone.drawio'));
+
+        $this->fireMediaDeleteFile('test:delone.png');
+
+        $this->assertFileDoesNotExist(mediaFN('test:delone.drawio'));
+        $this->assertContains(
+            'test:delone.drawio',
+            $this->deletedMediaIds,
+            'the cascade must go through media_delete(), so MEDIA_DELETE_FILE fires for the source too - a backup plugin hears about it the same way it hears about the image'
+        );
+    }
+
+    /**
+     * The one case that must NOT cascade: ns:plan.png and ns:plan.svg are
+     * two renderings of the same diagram and share one source (see
+     * helper.php's sourceID()). Deleting just the .png has not deleted "the
+     * diagram" - the .svg is still there and still needs ns:plan.drawio.
+     */
+    public function testDeletingOneRenderingLeavesTheSourceForTheOther()
+    {
+        $this->put('test:deltwo.svg', 'svg-bytes');
+        $this->put('test:deltwo.drawio', $this->diagramXml());
+
+        $this->fireMediaDeleteFile('test:deltwo.png');
+
+        $this->assertFileExists(mediaFN('test:deltwo.drawio'), 'the surviving .svg rendering still needs this source');
+    }
+
+    /**
+     * Deleting the second rendering, once the first is already gone, must
+     * then delete the source - the cascade looks at what is on disk right
+     * now, so it does not matter which rendering was deleted first.
+     */
+    public function testDeletingTheSecondRenderingThenDeletesTheSource()
+    {
+        $this->enableAcl(['test:* @ALL 16']);
+        $this->put('test:delboth.drawio', $this->diagramXml());
+        // .png already gone (simulating the earlier delete above)
+        $this->fireMediaDeleteFile('test:delboth.svg');
+
+        $this->assertFileDoesNotExist(mediaFN('test:delboth.drawio'));
+    }
+
+    /** A failed/no-op delete (unl=false) must not cascade to the source. */
+    public function testAFailedImageDeleteDoesNotCascade()
+    {
+        $this->put('test:delfail.drawio', $this->diagramXml());
+        $this->fireMediaDeleteFile('test:delfail.png', false);
+        $this->assertFileExists(mediaFN('test:delfail.drawio'));
+    }
+
+    /**
+     * Deleting the source directly must not reach out and delete the image.
+     * The image is not made worthless by losing its source - it still opens
+     * from its own embedded XML, exactly as it always did before this
+     * feature existed (see action.php's _source_xml()) - so a small text
+     * file's deletion silently destroying somebody's picture would be the
+     * more surprising direction, and it does not happen.
+     */
+    public function testDeletingTheSourceDirectlyDoesNotTouchTheImage()
+    {
+        $this->put('test:delsrc.png', 'png-bytes');
+        $this->fireMediaDeleteFile('test:delsrc.drawio');
+        $this->assertFileExists(mediaFN('test:delsrc.png'));
+    }
+
+    /** End to end, through the real core delete path (ACL granted), not just a synthetic event. */
+    public function testDeletingViaCoreMediaDeleteCascadesLive()
+    {
+        $this->enableAcl(['test:* @ALL 16'], 'alice');
+        $this->put('test:delreal.png', 'png-bytes');
+        $this->put('test:delreal.drawio', $this->diagramXml());
+
+        $result = media_delete('test:delreal.png', AUTH_DELETE);
+
+        $this->assertSame(DOKU_MEDIA_DELETED, $result & DOKU_MEDIA_DELETED);
+        $this->assertFileDoesNotExist(mediaFN('test:delreal.png'));
+        $this->assertFileDoesNotExist(mediaFN('test:delreal.drawio'), 'the source must go with the image through the real delete path too');
+    }
+
+    /** Drive the move plugin's own event shape (helper/op.php's moveMedia()). */
+    protected function fireMoveMedia($srcId, $dstId)
+    {
+        $data = [
+            'opts' => ['ns' => getNS($srcId), 'name' => noNS($srcId), 'newns' => getNS($dstId), 'newname' => noNS($dstId)],
+            'affected_pages' => [],
+            'src_id' => $srcId,
+            'dst_id' => $dstId,
+        ];
+        \dokuwiki\Extension\Event::createAndTrigger('PLUGIN_MOVE_MEDIA_RENAME', $data, null, false);
+    }
+
+    /**
+     * The bug this task exists to fix: renaming/moving a diagram's image
+     * used to strand its source under the old name, silently losing the
+     * "editable diagram" half of what this feature is for.
+     */
+    public function testMovingTheOnlyRenderingMovesItsSource()
+    {
+        $this->put('test:mv1.png', 'png-bytes');
+        $this->put('test:mv1.drawio', $this->diagramXml('moveme'));
+
+        $this->fireMoveMedia('test:mv1.png', 'ns2:renamed.png');
+
+        $this->assertFileDoesNotExist(mediaFN('test:mv1.drawio'), 'the old location must not keep the source behind');
+        $this->assertSame($this->diagramXml('moveme'), file_get_contents(mediaFN('ns2:renamed.drawio')));
+    }
+
+    /** Same "still needed under its old name" rule as the delete cascade. */
+    public function testMovingOneRenderingLeavesTheSourceForTheOther()
+    {
+        $this->put('test:mv2.svg', 'svg-bytes');
+        $this->put('test:mv2.drawio', $this->diagramXml('shared'));
+
+        $this->fireMoveMedia('test:mv2.png', 'ns2:mv2moved.png');
+
+        $this->assertFileExists(mediaFN('test:mv2.drawio'), 'the untouched .svg rendering still needs this source');
+        $this->assertFileDoesNotExist(mediaFN('ns2:mv2moved.drawio'));
+    }
+
+    /** Renaming to a namespace/name that already has its own source must not clobber it. */
+    public function testMovingNeverClobbersAnExistingSourceAtTheDestination()
+    {
+        $this->put('test:mv3.png', 'png-bytes');
+        $this->put('test:mv3.drawio', $this->diagramXml('mover'));
+        $this->put('test:mv3dest.drawio', 'unrelated-existing-source');
+
+        $this->fireMoveMedia('test:mv3.png', 'test:mv3dest.png');
+
+        $this->assertSame('unrelated-existing-source', file_get_contents(mediaFN('test:mv3dest.drawio')));
+    }
+
+    /** Renaming the source directly must not reach for the image - same asymmetry as delete. */
+    public function testMovingTheSourceDirectlyDoesNotTouchTheImage()
+    {
+        $this->put('test:mv4.png', 'png-bytes');
+        $this->put('test:mv4.drawio', $this->diagramXml());
+
+        $this->fireMoveMedia('test:mv4.drawio', 'test:mv4renamed.drawio');
+
+        $this->assertFileExists(mediaFN('test:mv4.png'), 'the image must stay exactly where it was');
+        // the source itself is core's/the move plugin's own job to move - this
+        // plugin only refuses to *cascade from* a source move into the image
+    }
+
+    public function testMovingTheSourceFiresMediaUploadFinishForBackupPlugins()
+    {
+        $this->put('test:mv5.png', 'png-bytes');
+        $this->put('test:mv5.drawio', $this->diagramXml('evented'));
+
+        $this->fireMoveMedia('test:mv5.png', 'ns2:mv5.png');
+
+        $this->assertCount(1, $this->firedEvents);
+        $this->assertSame('ns2:mv5.drawio', $this->firedEvents[0][2]);
+    }
+
+    // --- diagram text in the search index ---------------------------------
+
+    /** Drive the indexer's own event shape, the way inc/Search/Indexer.php builds it. */
+    protected function fireIndexerPageAdd($page, array $relationMedia)
+    {
+        $data = [
+            'page' => $page,
+            'body' => '',
+            'metadata' => [
+                'title' => $page,
+                'relation_references' => [],
+                'relation_media' => $relationMedia,
+                'internal_index' => true,
+            ],
+            'pid' => 1,
+        ];
+        \dokuwiki\Extension\Event::createAndTrigger('INDEXER_PAGE_ADD', $data, null, false);
+        return $data;
+    }
+
+    public function testIndexerAddsAReadableDiagramsTextToThePageBody()
+    {
+        $this->put('test:idx1.png', 'png-bytes');
+        $this->put('test:idx1.drawio', $this->diagramXml('firewall-label'));
+        // diagramXml()'s payload is just a marker string, not real drawio
+        // value= markup - use a fixture that actually parses as one
+        $xml = '<mxfile><diagram><mxGraphModel><root><mxCell value="firewall" vertex="1"/></root></mxGraphModel></diagram></mxfile>';
+        file_put_contents(mediaFN('test:idx1.drawio'), $xml);
+
+        $data = $this->fireIndexerPageAdd('idxpage1', ['test:idx1.png']);
+
+        $this->assertStringContainsString('firewall', $data['body']);
+    }
+
+    /** No source yet - must not warn/crash, and adds nothing. */
+    public function testIndexerIgnoresADiagramWithoutASource()
+    {
+        $this->put('test:idx2.png', 'png-bytes');
+        $data = $this->fireIndexerPageAdd('idxpage2', ['test:idx2.png']);
+        $this->assertSame('', trim($data['body']));
+    }
+
+    /** A referenced file that is not a diagram at all (relation_media lists every embedded media). */
+    public function testIndexerIgnoresNonDiagramMedia()
+    {
+        $this->put('test:notdiagram.jpg', 'jpg-bytes');
+        $data = $this->fireIndexerPageAdd('idxpage3', ['test:notdiagram.jpg']);
+        $this->assertSame('', trim($data['body']));
+    }
+
+    /**
+     * The leak this has to close: a page anyone can read must not hand out
+     * a restricted diagram's text through search just because the page
+     * embeds it. Fulltext search is checked against the *page's* permission,
+     * not the media's - core has no way to say "this word came from a
+     * namespace some readers may not see" - so the plugin has to refuse to
+     * put it there in the first place.
+     */
+    public function testIndexerDoesNotIndexADiagramFromADeniedNamespace()
+    {
+        $this->enableAcl(['secret:* @ALL 0']);
+        $this->put('secret:idx4.png', 'png-bytes');
+        $xml = '<mxfile><diagram><mxGraphModel><root><mxCell value="topsecretword" vertex="1"/></root></mxGraphModel></diagram></mxfile>';
+        file_put_contents(mediaFN('secret:idx4.drawio'), $xml);
+
+        $data = $this->fireIndexerPageAdd('idxpage4', ['secret:idx4.png']);
+
+        $this->assertStringNotContainsString(
+            'topsecretword',
+            $data['body'],
+            'a diagram in an ACL-restricted namespace must never reach a page\'s shared index'
+        );
+    }
+
+    /** The other half: a diagram explicitly readable by everyone must still be indexed with ACL on. */
+    public function testIndexerIndexesADiagramFromAnUnrestrictedNamespaceEvenWithAclOn()
+    {
+        $this->enableAcl(['secret:* @ALL 0', 'test:* @ALL 8']);
+        $this->put('test:idx5.png', 'png-bytes');
+        $xml = '<mxfile><diagram><mxGraphModel><root><mxCell value="openword" vertex="1"/></root></mxGraphModel></diagram></mxfile>';
+        file_put_contents(mediaFN('test:idx5.drawio'), $xml);
+
+        $data = $this->fireIndexerPageAdd('idxpage5', ['test:idx5.png']);
+
+        $this->assertStringContainsString('openword', $data['body']);
+    }
+
+    /** A zero-byte source is not a source - same rule action.php's own read path uses. */
+    public function testIndexerIgnoresAnEmptySource()
+    {
+        $this->put('test:idx6.png', 'png-bytes');
+        $this->put('test:idx6.drawio', '');
+        $data = $this->fireIndexerPageAdd('idxpage6', ['test:idx6.png']);
+        $this->assertSame('', trim($data['body']));
     }
 }
