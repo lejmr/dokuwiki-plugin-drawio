@@ -95,8 +95,9 @@
 					// add old revision to the attic if missing
 					media_saveOldRevision($media_id);
 				}
-				$filesize_old = file_exists($fl) ? filesize($fl) : 0;
-				
+				$overwrite = file_exists($fl);
+				$filesize_old = $overwrite ? filesize($fl) : 0;
+
 				// prepare directory
 				io_createNamespace($media_id, 'media');
 
@@ -107,11 +108,11 @@
                 $whandle = fopen($fl, 'w');
                 fwrite($whandle,base64_decode($base64data));
                 fclose($whandle);
-				
+
 				@clearstatcache(true, $fl);
 				$new = @filemtime($fl);
 				chmod($fl, $conf['fmode']);
-				
+
 				// Add to log
 				$filesize_new = filesize($fl);
 				$sizechange = $filesize_new - $filesize_old;
@@ -120,6 +121,17 @@
 				} else {
 					addMediaLogEntry($new, $media_id, DOKU_CHANGE_TYPE_CREATE, $lang['created'], '', null, $sizechange);
                 }
+
+				// Notify other plugins (e.g. gitbacked) that a media file was written.
+				// Same event core fires from media_save()/media_upload_finish() for a
+				// normal upload, same data shape (fn_tmp/name, fn, id, mime, overwrite,
+				// move) so existing consumers keep working. We already wrote the file
+				// ourselves above (this plugin never goes through DokuWiki's upload
+				// pipeline), so there's no default action to run and nothing to undo -
+				// this is fired purely as an after-the-fact notification.
+				list(, $mime) = mimetype($media_id);
+				$data = [basename($fl), $fl, $media_id, $mime, $overwrite, null];
+				\dokuwiki\Extension\Event::createAndTrigger('MEDIA_UPLOAD_FINISH', $data, null, false);
             }
             if($action == 'get_png'){
 				if (!file_exists($fl)) return;
