@@ -46,7 +46,16 @@ grep -v '^\s*$' "$STAGES_FILE" | grep -v '^\s*#' | while IFS='|' read -r branch 
     tree=$(git rev-parse "$branch^{tree}")
     git merge-base --is-ancestor "$base" "$branch" || { echo "FAIL $branch not based on master"; exit 1; }
   else
-    if [ "$(git cat-file -t "$src")" = tree ]; then tree=$src; else tree=$(git rev-parse "$src^{tree}"); fi
+    if [ "$(git cat-file -t "$src")" = tree ]; then
+      tree=$src
+      echo "WARNING: $src is a bare tree - cannot verify it contains origin/master; make sure it was built on top of it"
+    else
+      # A snapshot from a branch that predates other merged PRs carries a tree
+      # WITHOUT their changes, and the squash silently reverts them - the tree
+      # check below cannot catch that (the tree is exactly the stale one).
+      git merge-base --is-ancestor "$base" "$src" || { echo "FAIL $src does not contain origin/master ($base) - merge master into the topic branch, re-test, then snapshot"; exit 1; }
+      tree=$(git rev-parse "$src^{tree}")
+    fi
     commit=$(printf '%s\n\n%s\n' "$title" "$TR" | git commit-tree "$tree" -p "$base") || exit 1
     git branch -f "$branch" "$commit" || { echo "FAIL cannot move $branch (checked out somewhere?)"; exit 1; }
     git push -q -f origin "$branch" || { echo "FAIL push $branch"; exit 1; }
