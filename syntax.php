@@ -306,6 +306,39 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         }
         $alt = $title !== null ? $title : $media_id;
         $src = DOKU_BASE."lib/exe/fetch.php?media=".$this->mediaUrl($media_id);
+        if ($width !== null) {
+            // Ask fetch.php for a resized, server-cached copy instead of
+            // downloading the full-size file and shrinking it with CSS -
+            // the same mechanism core's own {{image.png?200}} uses via
+            // ml() (inc/common.php) and inc/fetch.functions.php's
+            // MEDIA_RESIZE handling. A page with ten diagrams sized to
+            // thumbnails then downloads ten thumbnails, not ten full-size
+            // images.
+            //
+            // SVG is not special-cased here, on purpose: core isn't
+            // either (Doku_Renderer_xhtml::_media() sends w/h to ml() for
+            // every image mime type). fetch.php's own MEDIA_RESIZE handler
+            // already skips resizing for image/svg+xml, so a sized SVG
+            // still gets the size params but is served unmodified -
+            // harmless (resizing a vector server-side is meaningless, not
+            // wrong), and identical to how core already treats a sized
+            // SVG everywhere else in a wiki.
+            //
+            // media_get_token() (inc/media.php) is an HMAC over the media
+            // id and size, keyed by a server secret (auth_cookiesalt()) -
+            // not anything about the viewer - so this URL is still the
+            // exact same string for every visitor. fetch.php's
+            // checkFileStatus() checks this token, then the read ACL, then
+            // file existence, in that order, for every request - it still
+            // enforces access at request time, same as the unsized case
+            // above.
+            $h = $height !== null ? (int) $height : 0;
+            $src .= "&amp;w=".$width;
+            if ($h) {
+                $src .= "&amp;h=".$h;
+            }
+            $src .= "&amp;tok=".media_get_token($media_id, (int) $width, $h);
+        }
         $placeholder = DOKU_BASE."lib/plugins/drawio/blank-image.png";
 
         $renderer->doc .= "<img class='mediacenter' id='".hsc($media_id)."'

@@ -286,3 +286,16 @@ pass, for someone who wants their whole wiki protected right now.
     reads "already has a source - left untouched", and clicking **Convert
     this batch** again must not change the file or its content - an existing
     source is never overwritten.
+
+===== 16. Configurable editor interface (ui=atlas was hardcoded) =====
+
+The editor's interface (kennedy/min/atlas/dark/sketch/simple) used to be
+hardcoded to ''atlas''. It is now a config setting.
+
+  - Open [[?do=admin&page=config|Admin → Configuration Settings]] and find
+    //Interface style of the draw.io editor// under the drawio plugin's
+    settings. Set it to ''min'' and save.
+  - Open diagram 1 at the top of this page: the editor must open in the
+    Minimal interface, not Atlas.
+  - The setting only offers the six values draw.io's ''ui'' parameter
+    actually understands - there is no free-text field to get this wrong in.

@@ -413,7 +413,23 @@ function edit_cb(image)
         }
     };
     window.addEventListener('message', receive);
-    iframe.setAttribute('src', conf['url'] + '?embed=1&ui=atlas&spin=1&proto=json');
+    // The interface (kennedy/min/atlas/dark/sketch/simple - see draw.io's own
+    // "Supported URL parameters" docs) used to be hardcoded to atlas; it's
+    // now an admin setting, published through JSINFO like every other
+    // config value this plugin has (conf/metadata.php, action.php's
+    // addjsinfo()). The fallback covers a page whose cached JSINFO predates
+    // this setting - same reason zIndex/lockwarning fall back elsewhere in
+    // this file.
+    //
+    // dark=auto is appended unconditionally: it only affects the themes
+    // that support a dark variant (min/sketch/simple) and is otherwise
+    // inert, so every wiki gets an editor that follows the visitor's
+    // browser/OS dark-mode preference for free, without a second setting.
+    // DokuWiki templates have no common, script-readable signal for "the
+    // wiki is currently in dark mode" (each ships its own toggle/CSS), so
+    // there is nothing reliable to read instead.
+    var ui = conf['ui'] || 'atlas';
+    iframe.setAttribute('src', conf['url'] + '?embed=1&ui=' + ui + '&dark=auto&spin=1&proto=json');
     document.body.appendChild(iframe);
 };
 

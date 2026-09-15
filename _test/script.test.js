@@ -92,7 +92,12 @@ function buildSandbox() {
         },
         document: {
             createElement: () => {
-                const iframe = { setAttribute() {}, contentWindow: { postMessage() {} } };
+                const attrs = {};
+                const iframe = {
+                    setAttribute(name, value) { attrs[name] = value; },
+                    getAttribute(name) { return attrs[name]; },
+                    contentWindow: { postMessage() {} },
+                };
                 iframes.push(iframe);
                 return iframe;
             },
@@ -738,3 +743,56 @@ console.log('OK: the renewal timer re-posts the lock action while the editor sta
 }
 
 console.log('OK: no renewal timer is scheduled when locking is disabled site-wide (locktime <= 0)');
+
+// --- configurable editor interface (ui=atlas was hardcoded) -----------------
+//
+// The editor's URL used to always ask for ui=atlas, one of several
+// interfaces draw.io offers (kennedy/min/atlas/dark/sketch/simple - see
+// https://www.drawio.com/doc/faq/supported-url-parameters). It's now read
+// from the plugin config, published through JSINFO like every other setting
+// this plugin has (see conf/metadata.php, action.php's addjsinfo()).
+
+// the admin's chosen interface reaches the iframe's src
+{
+    const { sandbox, iframes } = buildSandbox();
+    sandbox.JSINFO.plugin_drawio.ui = 'min';
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('uitest.png'));
+
+    const src = iframes[iframes.length - 1].getAttribute('src');
+    assert.ok(src.includes('ui=min'), 'iframe src must carry the configured ui: ' + src);
+    assert.ok(!src.includes('ui=atlas'), 'iframe src must not still hardcode ui=atlas: ' + src);
+}
+
+console.log('OK: the configured ui reaches the editor iframe URL');
+
+// no ui configured (e.g. cached JSINFO from before this setting existed) ->
+// falls back to the plugin's long-standing default, atlas
+{
+    const { sandbox, iframes } = buildSandbox();
+    delete sandbox.JSINFO.plugin_drawio.ui;
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('uifallback.png'));
+
+    const src = iframes[iframes.length - 1].getAttribute('src');
+    assert.ok(src.includes('ui=atlas'), 'missing ui config must fall back to atlas: ' + src);
+}
+
+console.log('OK: a missing ui config falls back to atlas');
+
+// dark=auto is always appended, so a dark-capable theme (min/sketch/simple)
+// follows the browser/OS preference for free - inert for kennedy/atlas/dark,
+// see draw.io's own docs for the dark= parameter.
+{
+    const { sandbox, iframes } = buildSandbox();
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('darkauto.png'));
+
+    const src = iframes[iframes.length - 1].getAttribute('src');
+    assert.ok(src.includes('dark=auto'), 'iframe src must ask for dark=auto: ' + src);
+}
+
+console.log('OK: dark=auto is always requested so dark-capable themes follow the OS preference');

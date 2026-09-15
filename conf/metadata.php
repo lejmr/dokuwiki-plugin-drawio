@@ -12,3 +12,8 @@ $meta['url']       = array('string');
 // 'never' makes the config UI itself unable to set one, instead of leaving
 // admin and code free to disagree about what's supported.
 $meta['toolbar_possible_extension'] = array('multicheckbox', '_choices' => array('png', 'svg'), '_other' => 'never');
+// script.js sends this straight to embed.diagrams.net as its ui= parameter,
+// which only understands these six values (draw.io's own "Supported URL
+// parameters" docs) - a plain string setting would let an admin type
+// anything and get a silently broken editor instead of an error.
+$meta['ui'] = array('multichoice', '_choices' => array('kennedy', 'min', 'atlas', 'dark', 'sketch', 'simple'));

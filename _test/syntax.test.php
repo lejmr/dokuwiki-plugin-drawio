@@ -241,6 +241,67 @@ class syntax_plugin_drawio_test extends DokuWikiTest
         $this->assertStringNotContainsString('height:', $html);
     }
 
+    /**
+     * A sized diagram must ask fetch.php for a resized copy (core's own
+     * mechanism, see inc/fetch.functions.php's MEDIA_RESIZE handling), not
+     * just shrink the full-size image with CSS - otherwise a page with many
+     * thumbnailed diagrams downloads full-size images for all of them.
+     */
+    public function testSizedDiagramRequestsAResizedCopyFromFetchPhp()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present?200x100}}');
+
+        $this->assertStringContainsString('w=200', $html);
+        $this->assertStringContainsString('h=100', $html);
+        $this->assertStringContainsString(
+            'tok='.media_get_token('test:present.png', 200, 100),
+            $html
+        );
+        // still responsive on a narrow screen, not just server-sized
+        $this->assertStringContainsString('max-width:100%', $html);
+    }
+
+    public function testWidthOnlySizeOmitsTheHeightParameter()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present?200}}');
+
+        $this->assertStringContainsString('w=200', $html);
+        $this->assertStringNotContainsString('h=', $html);
+        $this->assertStringContainsString(
+            'tok='.media_get_token('test:present.png', 200, 0),
+            $html
+        );
+    }
+
+    /**
+     * Server-side resizing a vector is meaningless - fetch.php's own
+     * MEDIA_RESIZE handler already skips it for image/svg+xml - so an SVG
+     * still gets the size params (matching what core's own {{image.svg?200}}
+     * sends via ml()), it just has no effect on what's served.
+     */
+    public function testSizedSvgDiagramStillCarriesSizeParamsLikeCoreDoes()
+    {
+        $this->createMedia('test:present.svg');
+
+        $html = $this->render('{{drawio>test:present.svg?200}}');
+
+        $this->assertStringContainsString('w=200', $html);
+    }
+
+    public function testUnsizedDiagramCarriesNoResizeParams()
+    {
+        $this->createMedia('test:present.png');
+
+        $html = $this->render('{{drawio>test:present}}');
+
+        $this->assertStringNotContainsString('w=', $html);
+        $this->assertStringNotContainsString('tok=', $html);
+    }
+
     public function testEmptyTitleFallsBackToMediaIdAsAlt()
     {
         $this->createMedia('test:present.png');
