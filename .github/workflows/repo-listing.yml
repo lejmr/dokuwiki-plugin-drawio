@@ -55,9 +55,18 @@ jobs:
         id: compare
         if: steps.fetch.outputs.reachable == 'true'
         run: |
-          # The API returns one object for a single extname; be lenient and
-          # also accept an array, in case that ever changes.
-          entry='if type == "array" then .[0] else . end'
+          # The API ignores every filter parameter (extname=, plugin=, ext=)
+          # and always returns the whole catalogue - ~1900 entries, sorted by
+          # name. Taking .[0] compared this plugin against `404manager` and
+          # reported a listing that was perfectly in sync as three years
+          # stale (issue #102). Select this plugin by name, and fail loudly
+          # rather than compare nothing if it is not in the payload.
+          entry='(if type == "array" then . else [.] end) | map(select(.plugin == "drawio")) | .[0]'
+          if [ "$(jq -r "$entry // empty" repo.json)" = "" ]; then
+            echo "::warning::the dokuwiki.org catalogue has no 'drawio' entry - skipping this run"
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           published_date=$(jq -r "($entry).lastupdate // empty" repo.json)
           published_url=$(jq -r "($entry).downloadurl // empty" repo.json)
           info_date=$(sed -nE 's/^date[[:space:]]+(.*[^[:space:]])[[:space:]]*$/\1/p' plugin.info.txt)
