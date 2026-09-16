@@ -113,3 +113,21 @@ reports everything has been scanned. Diagrams it cannot recover a source for
 (no draw.io XML was ever embedded in the image to begin with) are reported,
 not silently skipped - there is nothing to convert for those, and nothing this
 task can do about it.
+## Reach
+
+[![release downloads](https://img.shields.io/github/downloads/lejmr/dokuwiki-plugin-drawio/total?label=release%20downloads)](https://github.com/lejmr/dokuwiki-plugin-drawio/releases)
+[![latest release](https://img.shields.io/github/v/release/lejmr/dokuwiki-plugin-drawio?label=latest%20release)](https://github.com/lejmr/dokuwiki-plugin-drawio/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/lejmr/dokuwiki-plugin-drawio/ci.yml?branch=master&label=CI)](https://github.com/lejmr/dokuwiki-plugin-drawio/actions/workflows/ci.yml)
+
+The download counter counts the release asset only - installs through
+DokuWiki's Extension Manager fetch exactly that file, so it is the closest
+thing this plugin has to an install count. Anyone who cloned the repository,
+or who installed before the first release asset existed (2026-09-15), is not
+in it.
+
+The plugin page on dokuwiki.org publishes a *popularity* figure instead - the
+share of wikis that report this plugin through the
+[popularity plugin](https://www.dokuwiki.org/plugin:popularity): at the time
+of the 2026 release, 3.5 % of reporting wikis, rank 78 of 1863 plugins. It
+comes from wikis that opted in, so read it as a relative signal, not a count:
+<https://www.dokuwiki.org/plugin:drawio>.
