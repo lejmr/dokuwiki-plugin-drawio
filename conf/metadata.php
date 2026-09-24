@@ -34,6 +34,8 @@ $meta['toolbar_possible_extension'] = array(
 // parameters" docs) - a plain string setting would let an admin type
 // anything and get a silently broken editor instead of an error.
 $meta['ui'] = array('multichoice', '_choices' => array('kennedy', 'min', 'atlas', 'dark', 'sketch', 'simple'));
+// issue #107: script.js maps these to draw.io's dark=0 / dark=1 / dark=auto
+$meta['theme'] = array('multichoice', '_choices' => array('light', 'dark', 'auto'));
 // issue #62: a plain checkbox - onoff already stores/reads the 0/1 this
 // plugin's own getConf('edit_button') check treats as a bool.
 $meta['edit_button'] = array('onoff');

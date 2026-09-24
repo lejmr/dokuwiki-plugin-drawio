@@ -550,19 +550,21 @@ console.log('OK: no renewal timer is scheduled when locking is disabled site-wid
 
 console.log('OK: a missing ui config falls back to atlas');
 
-// dark=auto is always appended, so a dark-capable theme (min/sketch/simple)
-// follows the browser/OS preference for free
-{
+// no theme configured (cached JSINFO from before the setting, or a value
+// draw.io would not understand) -> light, never the OS-following auto (#107)
+for (const theme of [undefined, 'bogus']) {
     const { sandbox, iframes } = buildSandbox();
+    if (theme === undefined) delete sandbox.JSINFO.plugin_drawio.theme;
+    else sandbox.JSINFO.plugin_drawio.theme = theme;
     loadScript(sandbox);
 
-    sandbox.edit_cb(makeImage('darkauto.png'));
+    sandbox.edit_cb(makeImage('notheme.png'));
 
     const src = iframes[iframes.length - 1].getAttribute('src');
-    assert.ok(src.includes('dark=auto'), 'iframe src must ask for dark=auto: ' + src);
+    assert.ok(src.includes('&dark=0&'), 'theme ' + theme + ' must fall back to dark=0: ' + src);
 }
 
-console.log('OK: dark=auto is always requested so dark-capable themes follow the OS preference');
+console.log('OK: a missing or unknown theme falls back to light (dark=0) (#107)');
 
 // --- media manager: clicking the diagram's source (.drawio) opens it too ---
 //

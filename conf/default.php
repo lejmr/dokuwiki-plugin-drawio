@@ -8,6 +8,8 @@ $conf['zIndex']    = 999;
 $conf['url']       = 'https://embed.diagrams.net/';
 $conf['toolbar_possible_extension'] ='png';
 $conf['ui']        = 'atlas';
+// issue #107: light by default; auto follows the visitor's OS setting
+$conf['theme']     = 'light';
 // issue #62: off by default to keep current behaviour unchanged
 $conf['edit_button'] = 0;
 // issue #50: 0 keeps the iframe covering the whole viewport, as before
