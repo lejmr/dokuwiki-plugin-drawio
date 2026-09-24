@@ -75,8 +75,10 @@ runs the full three-branch test suite against that change, and only once
 that's green does it commit the bump, tag it, build the distribution zip,
 and publish a GitHub release with the matching `CHANGELOG.md` section as its
 body and the zip attached. A version that was already released, or a
-version with no `CHANGELOG.md` section, is refused before anything is
-touched - so add the changelog entry first.
+version with nothing in `CHANGELOG.md`, is refused before anything is
+touched. Write entries under `## [Unreleased]` as changes land; the release
+renames that heading to the release date and commits it with the date bump
+(a `## [YYYY-MM-DD]` section written by hand is used as it is).
 
 The one thing the workflow can't do for you: the run's **summary** ends with
 a `---- plugin ----` block (its `compatible` line comes from the DokuWiki
