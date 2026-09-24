@@ -5,7 +5,7 @@ written for someone running the plugin, not for someone patching its code —
 see the pull requests linked from each release on GitHub for the technical
 detail.
 
-## [Unreleased]
+## [2026-09-24]
 
 ### Added
 
