@@ -83,6 +83,9 @@ section 1.
   - **Admin → Configuration Settings → drawio**.
   - ''ui'' — pick ''sketch'' or ''min'' and reopen a diagram. The editor looks
     different.
+  - ''theme'' — ''light'' (the default) keeps the editor light even when your
+    computer is in dark mode; ''dark'' makes it dark; ''auto'' follows the
+    computer.
   - ''toolbar_possible_extension'' is now a pair of checkboxes rather than a
     free-text list.
 

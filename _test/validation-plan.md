@@ -36,7 +36,7 @@ browse(url): $CHROME --headless=new --disable-gpu --no-sandbox --user-data-dir=<
 - M2.3 pages whatsnew and drawio contain their titles.
 - M2.4 fetch.php media=wiki:sample.png → 200 image/png; media=wiki:sample.drawio → 404 (old-style, no source).
 - M2.5 login works; `Logged in as` present; token 32 chars.
-- M2.6 anonymous whatsnew JSINFO.plugin_drawio has zIndex,url,toolbar_possible_extension ["png","svg"],ui,editbutton,lockwarning,locktime,sectok.
+- M2.6 anonymous whatsnew JSINFO.plugin_drawio has zIndex,url,toolbar_possible_extension ["png","svg"],ui,theme,editbutton,lockwarning,locktime,sectok.
 - M2.7 `docker compose logs | grep -E 'PHP (Warning|Notice|Fatal|Deprecated)'` → baseline (expect empty).
 
 ## M3 browser, every context (anonymous unless stated)
@@ -46,9 +46,9 @@ browse(url): $CHROME --headless=new --disable-gpu --no-sandbox --user-data-dir=<
 - M3.4 `doku.php?do=media&ns=wiki&image=wiki:sample.png&tab_details=view`: `<li class="drawio__mmbtn"><div class="no"><button type="button">Edit with draw.io` inside ul.actions; Delete/Upload buttons present (logged-in only - anonymous has no Delete).
 - M3.5 `lib/exe/mediamanager.php?ns=wiki&image=wiki:sample.png`: no console error.
 - M3.7 logged-in `doku.php?do=admin&page=drawio`: h1 "Draw.io: convert old diagrams"; "1 diagram(s) found. 0 already have a source. 1 do not yet." (counts may differ by seeded media—report literal); row wiki:sample.png → "source can be recovered"; button "Convert this batch".
-- M3.8 logged-in `doku.php?do=admin&page=config`: `plugin____drawio____ui` select (6 options); `toolbar_possible_extension` checkboxes png+svg checked; no PHP warning in page.
+- M3.8 logged-in `doku.php?do=admin&page=config`: `plugin____drawio____ui` select (6 options); `plugin____drawio____theme` select (3 options, light selected); `toolbar_possible_extension` checkboxes png+svg checked; no PHP warning in page.
 - M3.9 `doku.php?do=search&q=walk-through` finds whatsnew (proves M3.1's view ran the indexer). If 0 → STOP.
-- M3.10 (#107) logged-in whatsnew, Chrome with `--force-dark-mode --blink-settings=preferredColorScheme=0`, click new:plan.png: the editor iframe `src` has `ui=` and no `dark=`; screenshot of the editor is light (kennedy and atlas).
+- M3.10 (#107) logged-in whatsnew, Chrome with `--force-dark-mode --blink-settings=preferredColorScheme=0`, click new:plan.png: editor iframe `src` contains `&dark=0&`; screenshot of the editor is light. With theme=auto (set in conf/local.php of a throwaway instance) the same click gives `&dark=auto&` and a dark screenshot.
 
 ## M4 user's server-side path (admin jar unless stated)
 - M4.1 get_auth new:plan.png → 200 `true`.

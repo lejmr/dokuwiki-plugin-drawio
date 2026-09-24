@@ -550,19 +550,21 @@ console.log('OK: no renewal timer is scheduled when locking is disabled site-wid
 
 console.log('OK: a missing ui config falls back to atlas');
 
-// dark=auto is never sent: draw.io applies it to kennedy/atlas too and an OS
-// in dark mode turned the editor dark (#107)
-{
+// no theme configured (cached JSINFO from before the setting, or a value
+// draw.io would not understand) -> light, never the OS-following auto (#107)
+for (const theme of [undefined, 'bogus']) {
     const { sandbox, iframes } = buildSandbox();
+    if (theme === undefined) delete sandbox.JSINFO.plugin_drawio.theme;
+    else sandbox.JSINFO.plugin_drawio.theme = theme;
     loadScript(sandbox);
 
-    sandbox.edit_cb(makeImage('nodark.png'));
+    sandbox.edit_cb(makeImage('notheme.png'));
 
     const src = iframes[iframes.length - 1].getAttribute('src');
-    assert.ok(!src.includes('dark='), 'iframe src must not ask for dark mode: ' + src);
+    assert.ok(src.includes('&dark=0&'), 'theme ' + theme + ' must fall back to dark=0: ' + src);
 }
 
-console.log('OK: the editor is not asked to follow the OS dark mode (#107)');
+console.log('OK: a missing or unknown theme falls back to light (dark=0) (#107)');
 
 // --- media manager: clicking the diagram's source (.drawio) opens it too ---
 //

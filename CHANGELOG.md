@@ -22,8 +22,8 @@ detail.
 ### Fixed
 
 - The editor opens in light mode again when the computer is set to dark
-  mode (#107). The editor's own toggle still switches, and the `ui` setting
-  `dark` gives a dark editor on purpose.
+  mode (#107). A new `theme` setting picks `light` (the default), `dark`, or
+  `auto` to follow the visitor's computer, as the editor did before.
 
 ## [2026-09-15]
 

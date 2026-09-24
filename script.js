@@ -522,12 +522,14 @@ function edit_cb(image)
     // this setting - same reason zIndex/lockwarning fall back elsewhere in
     // this file.
     //
-    // No dark=auto: draw.io applies it to every theme, kennedy and atlas
-    // included, so an OS in dark mode got a dark editor nobody asked for
-    // (#107). The editor opens light; its own toggle still switches, and
-    // ui=dark is there for a wiki that wants dark.
+    // The colour mode is its own setting (#107): draw.io applies dark= to
+    // every theme, kennedy and atlas included, so the old unconditional
+    // dark=auto turned the editor dark for anyone whose OS was dark. light
+    // sends dark=0 explicitly, so the editor stays light even then. The
+    // fallback covers a cached JSINFO from before this setting, like ui's.
     var ui = conf['ui'] || 'atlas';
-    iframe.setAttribute('src', conf['url'] + '?embed=1&ui=' + ui + '&spin=1&proto=json');
+    var dark = {light: '0', dark: '1', auto: 'auto'}[conf['theme']] || '0';
+    iframe.setAttribute('src', conf['url'] + '?embed=1&ui=' + ui + '&dark=' + dark + '&spin=1&proto=json');
     document.body.appendChild(iframe);
 };
 

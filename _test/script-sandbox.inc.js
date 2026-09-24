@@ -309,6 +309,7 @@ const REALISTIC_CONF = {
     url: 'https://embed.diagrams.net/',
     toolbar_possible_extension: ['png', 'svg'],
     ui: 'atlas',
+    theme: 'light',
     editbutton: 'Edit with draw.io',
     lockwarning: 'This diagram was opened by %USER% %MINUTES% minute(s) ago and may still be open there. Continue anyway?',
     locktime: 900,

@@ -86,6 +86,8 @@
                 'toolbar_possible_extension' => array_map('trim', explode(",",$this->getConf('toolbar_possible_extension'))),
                 // which draw.io interface the editor opens with (conf/default.php)
                 'ui' => $this->getConf('ui'),
+                // issue #107: light/dark/auto, sent as draw.io's dark= in script.js
+                'theme' => $this->getConf('theme'),
                 // issue #50: pushes the editor iframe down in script.js, so a
                 // template's own fixed top navbar doesn't cover the editor's
                 // menu bar. 0 (the default) leaves the iframe covering the

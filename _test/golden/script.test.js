@@ -261,6 +261,20 @@ console.log('OK: the toolbar entry is a picker for multiple configured extension
 
 console.log('OK: the configured ui, url and zIndex all reach the editor iframe');
 
+// --- 10: the configured colour mode reaches the editor iframe (#107) --------
+for (const [theme, dark] of [['light', 'dark=0'], ['dark', 'dark=1'], ['auto', 'dark=auto']]) {
+    const { sandbox, iframes } = buildSandbox();
+    sandbox.JSINFO.plugin_drawio.theme = theme;
+    loadScript(sandbox);
+
+    sandbox.edit_cb(makeImage('theme-' + theme + '.png'));
+
+    const src = iframes[iframes.length - 1].getAttribute('src');
+    assert.ok(src.includes('&' + dark + '&'), 'theme=' + theme + ' must send ' + dark + ': ' + src);
+}
+
+console.log('OK: theme light/dark/auto reach the editor as dark=0/1/auto (#107)');
+
 // --- 10: every ajax call carries the DokuWiki security token (sectok) -----
 {
     const SECTOK = 'sek-9f8e7d';
