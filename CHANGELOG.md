@@ -19,6 +19,12 @@ detail.
   the diagram XML itself. An "Edit with draw.io" button always sits under
   an interactive diagram, and a saved change shows up without a reload.
 
+### Fixed
+
+- The editor opens in light mode again when the computer is set to dark
+  mode (#107). The editor's own toggle still switches, and the `ui` setting
+  `dark` gives a dark editor on purpose.
+
 ## [2026-09-15]
 
 The first release to come out of an actual release process. It carries a

@@ -48,6 +48,7 @@ browse(url): $CHROME --headless=new --disable-gpu --no-sandbox --user-data-dir=<
 - M3.7 logged-in `doku.php?do=admin&page=drawio`: h1 "Draw.io: convert old diagrams"; "1 diagram(s) found. 0 already have a source. 1 do not yet." (counts may differ by seeded media—report literal); row wiki:sample.png → "source can be recovered"; button "Convert this batch".
 - M3.8 logged-in `doku.php?do=admin&page=config`: `plugin____drawio____ui` select (6 options); `toolbar_possible_extension` checkboxes png+svg checked; no PHP warning in page.
 - M3.9 `doku.php?do=search&q=walk-through` finds whatsnew (proves M3.1's view ran the indexer). If 0 → STOP.
+- M3.10 (#107) logged-in whatsnew, Chrome with `--force-dark-mode --blink-settings=preferredColorScheme=0`, click new:plan.png: the editor iframe `src` has `ui=` and no `dark=`; screenshot of the editor is light (kennedy and atlas).
 
 ## M4 user's server-side path (admin jar unless stated)
 - M4.1 get_auth new:plan.png → 200 `true`.

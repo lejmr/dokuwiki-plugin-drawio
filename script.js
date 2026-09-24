@@ -522,15 +522,12 @@ function edit_cb(image)
     // this setting - same reason zIndex/lockwarning fall back elsewhere in
     // this file.
     //
-    // dark=auto is appended unconditionally: it only affects the themes
-    // that support a dark variant (min/sketch/simple) and is otherwise
-    // inert, so every wiki gets an editor that follows the visitor's
-    // browser/OS dark-mode preference for free, without a second setting.
-    // DokuWiki templates have no common, script-readable signal for "the
-    // wiki is currently in dark mode" (each ships its own toggle/CSS), so
-    // there is nothing reliable to read instead.
+    // No dark=auto: draw.io applies it to every theme, kennedy and atlas
+    // included, so an OS in dark mode got a dark editor nobody asked for
+    // (#107). The editor opens light; its own toggle still switches, and
+    // ui=dark is there for a wiki that wants dark.
     var ui = conf['ui'] || 'atlas';
-    iframe.setAttribute('src', conf['url'] + '?embed=1&ui=' + ui + '&dark=auto&spin=1&proto=json');
+    iframe.setAttribute('src', conf['url'] + '?embed=1&ui=' + ui + '&spin=1&proto=json');
     document.body.appendChild(iframe);
 };
 
