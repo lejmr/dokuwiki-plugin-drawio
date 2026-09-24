@@ -21,9 +21,9 @@ the project:
   conventions and stop rules; add a step per acceptance row).
 - **Landing:** `bin/merge-stages.sh <stages> <bodies>` - topical squash PRs
   from snapshot trees, verified against master after every merge.
-- **Release:** *Actions -> Release -> Run workflow* only; needs a
-  `## [YYYY-MM-DD]` section in `CHANGELOG.md`; the dokuwiki.org block goes
-  to the job summary, never to release notes.
+- **Release:** *Actions -> Release -> Run workflow* only; it renames
+  `## [Unreleased]` in `CHANGELOG.md` to the date (refuses an empty one);
+  the dokuwiki.org block goes to the job summary, never to release notes.
 - **Security:** findings and policy in `SECURITY.md`; no public issues, no
   exploit recipes in PR text; xhtml output is viewer-independent by design
   (see `syntax.php` render()).

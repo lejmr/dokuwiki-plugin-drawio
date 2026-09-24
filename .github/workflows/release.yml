@@ -9,7 +9,8 @@ name: Release
 # It owns the whole release, in this order, and pushes nothing until the
 # tests have passed:
 #
-#   1. bump plugin.info.txt's date
+#   1. bump plugin.info.txt's date; rename CHANGELOG.md's [Unreleased]
+#      section to the release date if it has none of its own
 #   2. run the full three-branch test matrix against that change
 #   3. only now: commit the bump to master and tag it
 #   4. build the distribution zip from the tagged commit
@@ -73,10 +74,10 @@ jobs:
             exit 1
           fi
 
+      # Renames [Unreleased] to the release date when needed; the change
+      # goes out with the plugin.info.txt bump in the commit step below.
       - name: CHANGELOG.md has a section for this release
-        run: |
-          v="${{ steps.version.outputs.version }}"
-          grep -q "^## \[$v\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## [$v]' section"; exit 1; }
+        run: bin/changelog-release.sh "${{ steps.version.outputs.version }}"
 
       - name: bump plugin.info.txt's date
         run: bin/bump-date.sh
