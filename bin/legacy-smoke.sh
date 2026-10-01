@@ -20,7 +20,7 @@ printf '{{drawio>a}} {{drawio>a?300x200}} {{drawio>ns:missing}}\n' > data/pages/
 printf "<?php\n\$conf['useacl']=0;\n" > conf/local.php
 NAME=smoke-$$
 docker run -d --rm --name "$NAME" -p 0:80 -v "$ROOT:/var/www/html" -w /var/www/html "php:$PHP-cli" php -S 0.0.0.0:80 >/dev/null
-trap 'docker rm -f "$NAME" >/dev/null 2>&1; rm -rf "$ROOT"' EXIT
+trap 'docker rm -f "$NAME" >/dev/null 2>&1; rm -rf "$ROOT" || true' EXIT
 PORT=$(docker port "$NAME" 80 | head -1 | sed 's/.*://')
 sleep 3
 OUT=$(curl -s "http://localhost:$PORT/doku.php?id=t")
