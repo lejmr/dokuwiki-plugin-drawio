@@ -64,3 +64,20 @@ jobs:
       - name: PHPUnit (full suite)
         continue-on-error: ${{ matrix.dokuwiki == 'master' }}
         run: bin/run-tests.sh ${{ matrix.dokuwiki }}
+
+  legacy:
+    # issue #110: PHPUnit can't run on old DokuWiki releases, so just render a
+    # {{drawio}} page on each and fail on a fatal.
+    name: legacy DokuWiki ${{ matrix.dokuwiki }} (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {dokuwiki: release-2018-04-22c, php: '7.2'}
+          - {dokuwiki: release-2020-07-29a, php: '7.4'}
+          - {dokuwiki: release-2022-07-31b, php: '8.1'}
+          - {dokuwiki: release-2024-02-06b, php: '8.2'}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: bin/legacy-smoke.sh ${{ matrix.dokuwiki }} ${{ matrix.php }}
