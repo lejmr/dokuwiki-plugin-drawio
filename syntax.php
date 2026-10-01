@@ -217,7 +217,16 @@ class syntax_plugin_drawio extends DokuWiki_Syntax_Plugin
         // every path, otherwise a crafted name (e.g. containing a quote) reaches
         // the markup unsanitized. hsc()/mediaUrl() below are defense in depth on
         // top of that, not a substitute for it.
-        $media_id = (new \dokuwiki\File\MediaResolver("$current_ns:deprecated"))->resolveId($media_id);
+        //
+        // issue #110: MediaResolver only exists since DokuWiki 2022-07-31; on
+        // an older core calling it is a fatal "Class not found" on every page
+        // with a {{drawio}}, so fall back to the resolve_id() that core had
+        // before (the same call resolve_mediaid() made there).
+        if (class_exists('\dokuwiki\File\MediaResolver')) {
+            $media_id = (new \dokuwiki\File\MediaResolver("$current_ns:deprecated"))->resolveId($media_id);
+        } else {
+            $media_id = resolve_id($current_ns, $media_id);
+        }
 
         // issue #10: the media manager reads media usage from page metadata, so
         // without this a diagram looks unused and is easy to delete by accident.
