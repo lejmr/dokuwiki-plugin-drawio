@@ -30,6 +30,8 @@ browse(url): $CHROME --headless=new --disable-gpu --no-sandbox --user-data-dir=<
 - M1.1 `node _test/script.test.js` exit 0 (report OK count).
 - M1.2/3/4 `bin/test.sh stable|master|oldstable` → OK. Also `bin/test.sh stable golden` → OK, time it.
 
+- M1.5 `bin/legacy-smoke.sh release-2020-07-29a 7.4` (also 2018-04-22c/7.2, 2022-07-31b/8.1, 2024-02-06b/8.2) → `OK: <tag> on PHP <v>`; against a pre-fix plugin dir it must print `Class 'dokuwiki\File\MediaResolver' not found`.
+
 ## M2 fresh wiki
 - M2.1 `docker compose down -v; docker compose up --build -d` (DW_PORT as briefed).
 - M2.2 whatsnew reachable within 120 s.
