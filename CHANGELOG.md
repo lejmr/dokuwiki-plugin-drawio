@@ -5,6 +5,14 @@ written for someone running the plugin, not for someone patching its code —
 see the pull requests linked from each release on GitHub for the technical
 detail.
 
+## [Unreleased]
+
+### Fixed
+
+- Pages with a `{{drawio}}` no longer fail with "Class MediaResolver not
+  found" on DokuWiki releases older than 2022-07-31 (#110). A render check on
+  DokuWiki 2018, 2020, 2022 and 2024 now runs in CI.
+
 ## [2026-09-24]
 
 ### Added
