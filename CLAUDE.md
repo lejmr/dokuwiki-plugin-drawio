@@ -17,6 +17,9 @@ the project:
   `node _test/extra/script.test.js`. Golden = one happy path per feature,
   real draw.io exports as fixtures (`_test/real-drawio-export*`); extra =
   everything else. Whole-data-directory deltas: `_test/data-snapshot.inc.php`.
+- **Legacy releases:** `bin/legacy-smoke.sh <tag> <php>` (CI job `legacy`,
+  DokuWiki 2018-2024). Every new feature or code path extends it in the same
+  change and gets an acceptance row - see DEVELOPMENT.md "Verifying a change".
 - **Validation plan:** `_test/validation-plan.md` (machine phases M0-M6 with
   conventions and stop rules; add a step per acceptance row).
 - **Landing:** `bin/merge-stages.sh <stages> <bodies>` - topical squash PRs

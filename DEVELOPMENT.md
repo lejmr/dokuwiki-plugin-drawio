@@ -62,6 +62,15 @@ node _test/golden/script.test.js   # fast, one check per feature
 node _test/extra/script.test.js    # edge cases, security regressions, implementation details
 ```
 
+Old DokuWiki releases (2018-04-22c, 2020-07-29a, 2022-07-31b, 2024-02-06b)
+can't run PHPUnit - they ship no `_test/composer.json` - so they get a smoke
+test instead: `bin/legacy-smoke.sh` serves the release in `php:X-cli`, loads
+a page and fails on a fatal or a missing diagram (needs docker):
+
+```sh
+bin/legacy-smoke.sh release-2020-07-29a 7.4
+```
+
 ## Releasing
 
 Everything happens in one place: **Actions → Release → Run workflow**. It
@@ -158,6 +167,16 @@ never expired their cached ODT export, because saving a diagram touches no page.
 with nothing placed by hand. Anything the walkthrough needs must be seeded by
 the repository — otherwise it works on one machine and nowhere else.
 
+**Every new code path gets a legacy smoke request.** The full suite runs only
+on stable, oldstable and master; old releases see nothing but
+`bin/legacy-smoke.sh`. A new feature, syntax variant, handler or endpoint
+therefore extends that script with a request that exercises it, in the same
+change, and the acceptance table gets a row for it on all four legacy
+releases. Issue #110 is why: rendering called `MediaResolver`, which doesn't
+exist before DokuWiki 2022-07-31, and every page with a diagram died on
+older wikis while all tests were green. Calls into newer DokuWiki API need a
+fallback (`class_exists()` / `function_exists()`), not a version bump.
+
 **Validate the checklist before handing it to someone.** A list of things to
 click is a deliverable like any other, and shipping one that was never run wastes
 the reviewer's time and trust.
@@ -171,6 +190,8 @@ what catches a new DokuWiki release breaking the plugin. Only stable and
 oldstable are strict; a failure against DokuWiki's development branch
 (master) is reported but does not fail the build, since it means an
 unreleased DokuWiki changed something, not that this plugin regressed.
+The `legacy` job runs `bin/legacy-smoke.sh` against four old DokuWiki
+releases (2018-2024) on the same triggers; it is strict.
 
 `.github/workflows/repo-listing.yml` compares the dokuwiki.org plugin page
 against this repository (see **Releasing** above) on a weekly schedule, or
